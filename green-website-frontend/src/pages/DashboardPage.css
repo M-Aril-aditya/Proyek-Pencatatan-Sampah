@@ -1,0 +1,65 @@
+.dashboard-layout {
+  display: flex;
+  background-color: #f8f9fa; /* Latar belakang abu-abu muda */
+}
+
+.main-content {
+  flex-grow: 1;
+  margin-left: 250px; /* Sebesar lebar sidebar */
+  padding: 2rem;
+  min-height: 100vh;
+}
+
+.main-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+}
+
+.main-header h1 {
+  margin: 0;
+  color: #1D5D50;
+  font-size: 1.8rem;
+}
+
+.current-date-text {
+  font-size: 0.9rem;
+  color: #666;
+  margin-top: 4px;
+}
+
+.logout-button-main {
+  padding: 0.5rem 1rem;
+  background-color: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: background-color 0.2s ease;
+}
+
+.logout-button-main:hover {
+    background-color: #c82333;
+}
+
+.content-area {
+  /* Konten akan di-render di sini */
+}
+
+/* Style default untuk section di dalam konten */
+.content-section {
+  padding: 1.5rem;
+  background-color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  margin-bottom: 2rem;
+}
+
+.content-section h2 {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  color: #1D5D50;
+}
