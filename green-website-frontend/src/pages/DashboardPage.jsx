@@ -34,7 +34,7 @@ function DashboardPage() {
       <main className="main-content">
         <header className="main-header">
           <div className="header-left">
-            <h1>Selamat datang!</h1>
+            <h1>Selamat datang Pengguna!</h1>
             <p className="current-date-text">{currentDate}</p>
           </div>
           <button onClick={handleLogout} className="logout-button-main">Logout</button>

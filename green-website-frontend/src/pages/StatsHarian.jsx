@@ -20,51 +20,36 @@ function StatsHarian() {
       const token = localStorage.getItem('adminToken');
       if (!token) { navigate('/'); return; }
 
+      // Parameter yang sama untuk kedua request
       const params = { range: 'daily' };
+      const headers = { 'Authorization': `Bearer ${token}` };
       
       try {
-        const recordsResponse = await axios.get('http://localhost:5000/api/records', { 
-          params, headers: { 'Authorization': `Bearer ${token}` }
-        });
-        
-        const rawData = recordsResponse.data;
-        
-        // --- LOGIKA PERBAIKAN BARU ---
-        // Kita tidak akan menjumlahkan semua baris.
-        // Kita HANYA akan mencari baris summary "TERKELOLA" dan "TIDAK TERKELOLA".
-        
-        let finalTerkelola = 0;
-        let finalTidakTerkelola = 0;
+        // --- (PERUBAHAN LOGIKA FETCHING) ---
+        // Kita buat 2 permintaan API secara paralel
 
-        rawData.forEach(row => {
-          const weight = parseFloat(row.weight_kg) || 0;
+        const statsRequest = axios.get('http://localhost:5000/api/stats', { params, headers });
+        const recordsRequest = axios.get('http://localhost:5000/api/records', { params, headers });
 
-          // Kita cari berdasarkan 'item_label' (atau 'item_id' jika lebih unik)
-          // Pastikan ejaan 'TERKELOLA' dan 'TIDAK TERKELOLA' sama persis
-          // dengan yang ada di database/CSV Anda.
-          if (row.item_label === 'TERKELOLA') {
-            finalTerkelola += weight; // Menggunakan += untuk keamanan jika ada > 1 baris
-          } else if (row.item_label === 'TIDAK TERKELOLA') {
-            finalTidakTerkelola += weight;
-          }
-          
-          // Semua baris data mentah lainnya (Kertas, Plastik, dll)
-          // akan diabaikan oleh logika Pie Chart ini.
-        });
-        // --- AKHIR DARI LOGIKA PERBAIKAN ---
+        // Tunggu keduanya selesai
+        const [statsResponse, recordsResponse] = await Promise.all([
+          statsRequest,
+          recordsRequest
+        ]);
 
-        // Data untuk Pie Chart sekarang HANYA berisi 142 dan 57
-        const newPieData = [
-          { name: 'Terkelola', value: finalTerkelola },       // Seharusnya 142.00
-          { name: 'Tidak Terkelola', value: finalTidakTerkelola } // Seharusnya 57.00
-        ];
+        // 1. Data untuk Pie Chart (langsung dari /api/stats)
+        const newPieData = statsResponse.data; // Ini adalah array [ { name, value }, { name, value } ]
         
-        // Totalnya sekarang adalah 142.00 + 57.00 = 199.00
-        const newTotal = finalTerkelola + finalTidakTerkelola;
+        // 2. Data untuk Tabel (langsung dari /api/records)
+        const newTableData = recordsResponse.data;
+
+        // Hitung total bobot HANYA dari data pie
+        const newTotal = newPieData.reduce((sum, entry) => sum + entry.value, 0);
 
         setPieData(newPieData);
-        setTotalWeight(newTotal); // Total di tooltip akan menjadi 199.00 Kg
-        setTableData(rawData); // Data tabel mentah TETAP menampilkan SEMUA data (914.00 Kg)
+        setTotalWeight(newTotal);
+        setTableData(newTableData); 
+        // --- (AKHIR PERUBAHAN LOGIKA) ---
         
       } catch (error) {
         console.error('Error fetching daily data:', error);
@@ -78,10 +63,7 @@ function StatsHarian() {
       }
     };
     fetchData();
-  }, [navigate]);
-
-  // --- Sisa JSX (Render) tidak berubah ---
-  // (Tetap sama seperti kode Anda sebelumnya)
+  }, [navigate]); // Dependensi 'navigate' sudah benar
 
   return (
     <div className="content-section">
@@ -89,9 +71,9 @@ function StatsHarian() {
       
       {isLoading ? ( <p>Memuat data...</p> )
       : errorMessage ? ( <p style={{ color: 'red' }}>{errorMessage}</p> )
-      // Kita cek totalWeight (sekarang 199.00), bukan 0
       : totalWeight === 0 ? ( <p>Belum ada data untuk hari ini.</p> )
       : (
+        // --- (BAGIAN PIE CHART TIDAK BERUBAH) ---
         <div style={{ width: '100%', height: 300, marginBottom: '2rem' }}>
           <ResponsiveContainer>
             <PieChart>
@@ -109,7 +91,6 @@ function StatsHarian() {
                   <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                 ))}
               </Pie>
-              {/* Tooltip sekarang akan menampilkan total 199.00 Kg */}
               <Tooltip formatter={(value) => `${value.toFixed(2)} Kg`} />
               <Legend />
             </PieChart>
@@ -117,8 +98,7 @@ function StatsHarian() {
         </div>
       )}
 
-      {/* Tabel Preview (Data Mentah) */}
-      {/* Tabel ini TETAP menampilkan SEMUA data (914.00 Kg) karena ini adalah "Data Mentah" */}
+      {/* --- (PERUBAHAN PADA TABEL DATA MENTAH) --- */}
       {!isLoading && (
         <div style={styles.previewContainer}>
           <h3 style={styles.previewTitle}>Data Mentah</h3>
@@ -127,8 +107,10 @@ function StatsHarian() {
               <thead>
                 <tr>
                   <th style={styles.th}>Area</th>
-                  <th style={styles.th}>Seksi</th>
+                  {/* <th style={styles.th}>Seksi</th> <-- DIHAPUS */ }
                   <th style={styles.th}>Nama Item</th>
+                  <th style={styles.th}>Pengelola</th> {/* <-- DITAMBAH */}
+                  <th style={styles.th}>Status</th>     {/* <-- DITAMBAH */}
                   <th style={styles.th}>Bobot (Kg)</th>
                   <th style={styles.th}>Petugas</th>
                   <th style={styles.th}>Waktu Catat</th>
@@ -139,8 +121,10 @@ function StatsHarian() {
                   tableData.map((row, index) => (
                     <tr key={index}>
                       <td style={styles.td}>{row.area_label}</td>
-                      <td style={styles.td}>{row.section_title}</td>
+                      {/* <td style={styles.td}>{row.section_title}</td> <-- DIHAPUS */ }
                       <td style={styles.td}>{row.item_label}</td>
+                      <td style={styles.td}>{row.pengelola}</td> {/* <-- DITAMBAH */}
+                      <td style={styles.td}>{row.status}</td>     {/* <-- DITAMBAH */}
                       <td style={styles.td}>{parseFloat(row.weight_kg).toFixed(2)}</td>
                       <td style={styles.td}>{row.petugas_name}</td>
                       <td style={styles.td}>{new Date(row.recorded_at).toLocaleString('id-ID')}</td>
@@ -148,7 +132,8 @@ function StatsHarian() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="6" style={{ ...styles.td, textAlign: 'center' }}>Tidak ada data mentah.</td>
+                    {/* colSpan sekarang 7 (karena ada 7 kolom) */}
+                    <td colSpan="7" style={{ ...styles.td, textAlign: 'center' }}>Tidak ada data mentah.</td>
                   </tr>
                 )}
               </tbody>
@@ -160,7 +145,7 @@ function StatsHarian() {
   );
 }
 
-// Objek Styles
+// Objek Styles (TIDAK BERUBAH)
 const styles = {
   previewContainer: { marginTop: '2rem' },
   previewTitle: { color: '#333' },

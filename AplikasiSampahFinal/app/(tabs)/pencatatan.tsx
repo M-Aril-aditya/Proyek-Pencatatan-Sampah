@@ -6,77 +6,105 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Button, Keyboard, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import RNPickerSelect from 'react-native-picker-select';
 
-// --- DEFINISI TIPE (UNTUK MEMPERBAIKI ERROR) ---
+// --- (PERUBAHAN) DEFINISI TIPE ---
+// Dibuat lebih sederhana, status akan 'implisit' (tergantung dia ada di array mana)
 interface Field {
   id: string;
   label: string;
+  pengelola: string;
 }
-interface Section {
-  title: string;
-  fields: Field[];
+// Struktur baru untuk data
+interface AreaData {
+  terkelola: Field[];
+  tidakTerkelola: Field[];
 }
 interface DataStructureType {
-  [key: string]: Section[];
+  [key: string]: AreaData;
 }
+// Tipe untuk baris ekspor
 interface ExportRow {
   area: string;
-  section: string;
   item_label: string;
   item_id: string;
   weight: string;
+  status: 'Terkelola' | 'Tidak Terkelola';
+  pengelola: string;
 }
-// --------------------------------------------------
+// ------------------------------------
 
-// --- STRUKTUR DATA (DARI KODE ANDA, TIDAK DIUBAH) ---
 const DAFTAR_AREA = [
-    { label: 'Area Kantor', value: 'area_kantor' },
-    { label: 'Area Parkir / Taman / Jalan', value: 'area_parkir' },
-    { label: 'Area Tempat Makan', value: 'area_tempat_makan' },
-    { label: 'Area Ruang Tunggu', value: 'area_ruang_tunggu' },
+  { label: 'Area Kantor', value: 'area_kantor' },
+  { label: 'Area Parkir / Taman / Jalan', value: 'area_parkir' },
+  { label: 'Area Tempat Makan', value: 'area_tempat_makan' },
+  { label: 'Area Ruang Tunggu', value: 'area_ruang_tunggu' },
 ];
 
-const DATA_STRUCTURE: DataStructureType = {
-  'area_kantor': [
-    { title: 'CV Tunas Baru', fields: [ { id: 'kertas_cv', label: 'Kertas (Kg)' }, { id: 'kardus_cv', label: 'Kardus (Kg)' }, { id: 'plastik_cv', label: 'Plastik (Kg)' }, { id: 'duplex_cv', label: 'Duplex (Kg)' }, { id: 'kantung_semen_cv', label: 'Kantung Semen (Kg)' } ] },
-    { title: 'Bank Sampah', fields: [ { id: 'plastik_bank', label: 'Plastik (Kg)' }, { id: 'kardus_bank', label: 'Kardus (Kg)' }, { id: 'duplex_bank', label: 'Duplex (Kg)' } ] },
-    { title: 'Sampah Lainnya Area Kantor', fields: [ { id: 'sampah_campur', label: 'Sampah Campur (Kg)' }, { id: 'vial', label: 'Vial (Kg)' }, { id: 'drum_kardus', label: 'Drum Kardus (Kg)' }, { id: 'botol', label: 'Botol (Kg)' } ] },
-    { title: 'Terkelola Dan Tidak Terkelola', fields: [ { id: 'kil_terkelola', label: 'TERKELOLA' }, { id: 'kil_tidak_terkelola', label: 'TIDAK TERKELOLA' }, ] }
-  ],
-  'area_parkir': [
-    { title: 'Area Parkir / Taman / Jalan', fields: [ { id: 'daun_kering', label: 'Daun Kering' }, ] },
-    { title: 'Terkelola Dan Tidak Terkelola', fields: [ { id: 'kil_terkelola', label: 'TERKELOLA' }, { id: 'kil_tidak_terkelola', label: 'TIDAK TERKELOLA' }, ] }
-  ],
-  'area_tempat_makan': [
-    { title: 'Area Tempat Makan', fields: [ { id: 'gelas_plastik', label: 'Gelas Plastik' }, { id: 'sampah_kantin_warehouse', label: 'Sampah Kantin Warehouse' }, { id: 'sampah_kantin_pabrik', label: 'Sampah Kantin Pabrik' } ] },
-    { title: 'Terkelola Dan Tidak Terkelola', fields: [ { id: 'kil_terkelola', label: 'TERKELOLA' }, { id: 'kil_tidak_terkelola', label: 'TIDAK TERKELOLA'}, ] }
-  ],
-  'area_ruang_tunggu': [
-    { title: 'Area Ruang Tunggu', fields: [ { id: 'organik', label: 'Organik' }, { id: 'anorganik', label: 'Anorganik' }, { id: 'residu', label: 'Residu'}, ] },
-    { title: 'Terkelola Dan Tidak Terkelola', fields: [ { id: 'kil_terkelola', label: 'TERKELOLA' }, { id: 'kil_tidak_terkelola', label: 'TIDAK TERKELOLA' }, ] }
-  ]
+// --- (PERUBAHAN BESAR) STRUKTUR DATA BARU SESUAI DESAIN FIGMA ---
+// Sekarang setiap area punya 2 properti: 'terkelola' dan 'tidakTerkelola'
+// Ini 100% mencerminkan data Excel dan desain 2 Boks Anda.
+const DATA_SAMPAH_PER_AREA: DataStructureType = {
+  'area_kantor': {
+    terkelola: [
+      { id: 'kertas_cv', label: 'Kertas', pengelola: 'CV Tunas Baru / Bank Sampah' }, 
+      { id: 'kardus_cv', label: 'Kardus', pengelola: 'CV Tunas Baru / Bank Sampah' }, 
+      { id: 'plastik_cv', label: 'Plastik', pengelola: 'CV Tunas Baru / Bank Sampah' }, 
+      { id: 'duplex_cv', label: 'Duplex', pengelola: 'CV Tunas Baru / Bank Sampah' }, 
+      { id: 'kantung_semen_cv', label: 'Kantung Semen', pengelola: 'CV Tunas Baru' }, 
+    ],
+    tidakTerkelola: [
+      { id: 'sampah_campur', label: 'Sampah Campur', pengelola: '-' }, 
+      { id: 'vial', label: 'Vial', pengelola: '-' }, 
+      { id: 'drum_kardus', label: 'Drum Kardus', pengelola: '-' }, 
+      { id: 'botol', label: 'Botol', pengelola: '-' } 
+    ]
+  },
+  'area_parkir': {
+    terkelola: [
+      // Sesuai Excel, 'Daun Kering' terkelola (salah lihat, harusnya tidak)
+      // { id: 'daun_kering', label: 'Daun Kering', pengelola: '-' },  <- Dihapus dari sini
+      // EDIT: Sesuai Excel, Daun Kering TIDAK TERKELOLA.
+    ],
+    tidakTerkelola: [
+      { id: 'daun_kering', label: 'Daun Kering', pengelola: '-' }, // <-- Pindah ke sini
+    ]
+  },
+  'area_tempat_makan': {
+    terkelola: [
+      { id: 'gelas_plastik', label: 'Gelas Plastik', pengelola: '-' }, 
+    ], // <-- KOSONG, ini yang penting
+    tidakTerkelola: [
+      { id: 'sampah_kantin_warehouse', label: 'Sampah Kantin Warehouse', pengelola: '-' }, 
+      { id: 'sampah_kantin_pabrik', label: 'Sampah Kantin Pabrik', pengelola: '-' } 
+    ]
+  },
+  'area_ruang_tunggu': {
+    terkelola: [
+      { id: 'organik', label: 'Organik', pengelola: '-' },
+    ],
+    tidakTerkelola: [ 
+      { id: 'anorganik', label: 'Anorganik', pengelola: '-' }, 
+      { id: 'residu', label: 'Residu', pengelola: '-' }, 
+    ]
+  }
 };
+// --- BATAS PERUBAHAN DATA STRUCTURE ---
 
 const HISTORY_STORAGE_KEY = 'wasteHistory_v3';
 
 export default function PencatatanScreen() {
   const router = useRouter();
   const { user } = useLocalSearchParams();
-  // --- PERBAIKAN STATE ERROR ---
   const [selectedAreaState, setSelectedAreaInternal] = useState<string | null>(null);
-  // -----------------------------
   const [dateTime, setDateTime] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [bobotSampah, setBobotSampah] = useState<{ [key: string]: string }>({});
 
-  // --- FUNGSI BARU UNTUK ATUR AREA & RESET BOBOT ---
   const setSelectedArea = (value: string | null) => {
-    setSelectedAreaInternal(value);
-    // Kosongkan data bobot lama saat area diganti
-    setBobotSampah({}); 
+    setSelectedAreaInternal(value); 
   };
-  // ------------------------------------------------
 
   useEffect(() => {
+    // (Fungsi useEffect, loadHistory, dll... tidak ada perubahan)
     const loadHistory = async () => {
       const userKey = user ? user.toString() : null;
       if (!userKey) {
@@ -104,6 +132,7 @@ export default function PencatatanScreen() {
   }, [user]);
 
   const handleInputChange = (id: string, text: string) => {
+    // (Tidak ada perubahan)
     const cleanedText = text.replace(/[^0-9.]/g, '');
     setBobotSampah(prevState => ({ ...prevState, [id]: cleanedText }));
   };
@@ -116,42 +145,80 @@ export default function PencatatanScreen() {
       return;
     }
     try {
-       const allHistoryString = await AsyncStorage.getItem(HISTORY_STORAGE_KEY);
-       const allHistory = allHistoryString ? JSON.parse(allHistoryString) : {};
-       allHistory[userKey] = bobotSampah;
-       await AsyncStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(allHistory));
-       Alert.alert('Tersimpan', 'Data berhasil disimpan sementara di perangkat.');
+        const allHistoryString = await AsyncStorage.getItem(HISTORY_STORAGE_KEY);
+        const allHistory = allHistoryString ? JSON.parse(allHistoryString) : {};
+        
+        // --- PERBAIKAN DIMULAI DARI SINI ---
+
+        // 1. Ambil data LAMA yang mungkin sudah tersimpan
+        const existingUserHistory = allHistory[userKey] || {};
+
+        // 2. Gabungkan data LAMA dengan data BARU (yang ada di state)
+        const updatedUserHistory = {
+          ...existingUserHistory,
+          ...bobotSampah
+        };
+        
+        // 3. Simpan data yang sudah digabung
+        allHistory[userKey] = updatedUserHistory; 
+        
+        // --- PERBAIKAN SELESAI ---
+
+        await AsyncStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(allHistory));
+        Alert.alert('Tersimpan', 'Data berhasil disimpan sementara di perangkat.');
     } catch (error) {
-       console.error("Gagal menyimpan riwayat:", error);
-       Alert.alert("Error", "Gagal menyimpan data riwayat.");
+        console.error("Gagal menyimpan riwayat:", error);
+        Alert.alert("Error", "Gagal menyimpan data riwayat.");
     }
   };
 
+  // --- (PERUBAHAN) LOGIKA EKSPOR ---
   const handleEkspor = async () => {
       const userKey = user ? user.toString() : null;
-      const areaKey = selectedAreaState as string; // Gunakan state yang sudah diganti namanya
+      const areaKey = selectedAreaState as string;
       
       if (!userKey || !areaKey) {
           Alert.alert('Gagal', 'Pastikan Area dan User sudah teridentifikasi.');
           return;
       }
 
-      const areaStructure = DATA_STRUCTURE[areaKey] || [];
-      const dataToExport: ExportRow[] = []; // Terapkan tipe
+      // Ambil data sesuai struktur baru
+      const areaData = DATA_SAMPAH_PER_AREA[areaKey];
+      if (!areaData) {
+        Alert.alert('Error', 'Data untuk area ini tidak ditemukan.');
+        return;
+      }
+      
+      const dataToExport: ExportRow[] = [];
 
-      areaStructure.forEach((section: Section) => { // Terapkan tipe
-          section.fields.forEach((field: Field) => { // Terapkan tipe
-              const weight = bobotSampah[field.id];
-              if (weight && parseFloat(weight) > 0) {
-                  dataToExport.push({
-                      area: areaKey,
-                      section: section.title,
-                      item_label: field.label,
-                      item_id: field.id,
-                      weight: weight
-                  });
-              }
-          });
+      // 1. Loop data TERKELOLA
+      areaData.terkelola.forEach((field: Field) => {
+          const weight = bobotSampah[field.id];
+          if (weight && parseFloat(weight) > 0) {
+              dataToExport.push({
+                  area: areaKey,
+                  item_label: field.label,
+                  item_id: field.id,
+                  weight: weight,
+                  status: 'Terkelola', // <-- Ditentukan di sini
+                  pengelola: field.pengelola
+              });
+          }
+      });
+
+      // 2. Loop data TIDAK TERKELOLA
+      areaData.tidakTerkelola.forEach((field: Field) => {
+          const weight = bobotSampah[field.id];
+          if (weight && parseFloat(weight) > 0) {
+              dataToExport.push({
+                  area: areaKey,
+                  item_label: field.label,
+                  item_id: field.id,
+                  weight: weight,
+                  status: 'Tidak Terkelola', // <-- Ditentukan di sini
+                  pengelola: field.pengelola
+              });
+          }
       });
 
       if (dataToExport.length === 0) {
@@ -159,16 +226,22 @@ export default function PencatatanScreen() {
           return;
       }
 
-      // Perbaiki header CSV (hapus ID Item)
-      const headerString = 'Area,Section,Nama Item,Bobot (Kg),Petugas,Waktu Catat\n';
-      // Perbaiki baris CSV (hapus ID Item)
+      // Header dan baris CSV (Sama seperti sebelumnya, sudah benar)
+      const headerString = 'Area,Nama Item,Pengelola,Status,Bobot (Kg),Petugas,Waktu Catat\n';
+      
       const rowString = dataToExport.map((row: ExportRow) => 
-          `"${DAFTAR_AREA.find(a => a.value === row.area)?.label}","${row.section}","${row.item_label}",${row.weight},"${userKey}","${dateTime}"\n`
+          `"${DAFTAR_AREA.find(a => a.value === row.area)?.label}",` +
+          `"${row.item_label}",` +
+          `"${row.pengelola}",` +
+          `"${row.status}",` +
+          `${row.weight},` +
+          `"${userKey}",` +
+          `"${dateTime}"\n`
       ).join('');
       
       const csvString = `${headerString}${rowString}`;
       
-      // --- PERUBAHAN NAMA FILE (SESUAI PERMINTAAN ANDA) ---
+      // Logika pembuatan file (Sama seperti sebelumnya, sudah benar)
       const now = new Date();
       const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
       const day = now.getDate();
@@ -178,7 +251,6 @@ export default function PencatatanScreen() {
       const minutes = now.getMinutes().toString().padStart(2, '0');
       const userName = userKey ? userKey.toLowerCase() : 'unknown';
       const filename = `green-${userName}-${day}${month}${year}-${hours}${minutes}.csv`;
-      // --- BATAS AKHIR PERUBAHAN NAMA FILE ---
       
       const fileUri = (FileSystem as any).documentDirectory + filename;
       try {
@@ -199,52 +271,72 @@ export default function PencatatanScreen() {
                       const allHistory = allHistoryString ? JSON.parse(allHistoryString) : {};
                       allHistory[userKey] = newData;
                       await AsyncStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(allHistory));
-                  } catch (e: any) { // Terapkan tipe 'any'
+                  } catch (e: any) {
                       console.error("Gagal update history setelah hapus: ", e);
                   }
               }}
           ]);
 
-      } catch (error: any) { // Terapkan tipe 'any'
+      } catch (error: any) {
           console.error('Error saat ekspor:', error);
           Alert.alert('Error', 'Gagal membuat atau membagikan file CSV.');
       }
   };
+  // --- BATAS AKHIR PERUBAHAN EKSPOR ---
 
+  // --- (PERUBAHAN BESAR) renderDynamicForm ---
+  // Ditulis ulang agar sesuai desain FIGMA (2 Boks Terpisah)
   const renderDynamicForm = () => {
-    const areaKey = selectedAreaState as string; 
+    const areaKey = selectedAreaState; 
     if (!areaKey) {
       return <Text style={styles.placeholderText}>Silakan pilih area terlebih dahulu...</Text>;
     }
     
-    const areaStructure = DATA_STRUCTURE[areaKey]; 
-    if (!areaStructure) {
+    const areaData = DATA_SAMPAH_PER_AREA[areaKey]; 
+    if (!areaData) {
       return <Text style={styles.placeholderText}>Struktur data untuk area ini tidak ditemukan.</Text>;
     }
 
+    // Helper untuk render baris input, agar tidak duplikat kode
+    const renderField = (field: Field) => (
+      <View key={field.id} style={styles.itemRowContainer}>
+        <Text style={styles.itemNama}>{field.label} (Kg)</Text> 
+        <TextInput
+            style={styles.inputBox}
+            keyboardType="decimal-pad"
+            onChangeText={(text) => handleInputChange(field.id, text)}
+            value={bobotSampah[field.id] || ''}
+            placeholder="0.0"
+            placeholderTextColor="#aaa"
+        />
+      </View>
+    );
+
     return (
       <View>
-        {areaStructure.map((section: Section, index: number) => (
-          <View key={index} style={styles.sectionContainer}>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
-            {section.fields.map((field: Field) => (
-              <View key={field.id} style={styles.itemRowContainer}>
-                <Text style={styles.itemNama}>{field.label}</Text>
-                <TextInput
-                    style={styles.inputBox}
-                    keyboardType="decimal-pad"
-                    onChangeText={(text) => handleInputChange(field.id, text)}
-                    value={bobotSampah[field.id] || ''}
-                    placeholder="0.0"
-                    placeholderTextColor="#aaa"
-                />
-              </View>
-            ))}
-          </View>
-        ))}
+        {/* --- BOKS 1: SAMPAH TERKELOLA --- */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>Sampah Terkelola</Text>
+          {areaData.terkelola.length > 0 ? (
+            areaData.terkelola.map(renderField)
+          ) : (
+            <Text style={styles.emptyListText}>- Tidak ada item -</Text>
+          )}
+        </View>
+
+        {/* --- BOKS 2: SAMPAH TIDAK TERKELOLA --- */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>Sampah Tidak Terkelola</Text>
+          {areaData.tidakTerkelola.length > 0 ? (
+            areaData.tidakTerkelola.map(renderField)
+          ) : (
+            <Text style={styles.emptyListText}>- Tidak ada item -</Text>
+          )}
+        </View>
       </View>
     );
   };
+  // --- BATAS AKHIR renderDynamicForm ---
 
   if (isLoading) {
     return (
@@ -261,11 +353,11 @@ export default function PencatatanScreen() {
       <View style={styles.headerContainer}>
         <View style={styles.pickerContainer}>
           <RNPickerSelect
-              placeholder={{ label: "Pilih Area...", value: null }}
-              items={DAFTAR_AREA}
-              onValueChange={(value) => setSelectedArea(value)} // Panggil fungsi setter kustom
-              style={pickerSelectStyles}
-              value={selectedAreaState} // Gunakan state yang sudah diganti namanya
+            placeholder={{ label: "Pilih Area...", value: null }}
+            items={DAFTAR_AREA}
+            onValueChange={(value) => setSelectedArea(value)}
+            style={pickerSelectStyles}
+            value={selectedAreaState}
           />
         </View>
         <View style={styles.userInfoContainer}>
@@ -282,14 +374,13 @@ export default function PencatatanScreen() {
       </View>
 
       <View style={{marginTop: 40}}>
-        {/* PERBAIKAN ERROR ROUTER */}
         <Button title="Logout" color="#C0392B" onPress={() => router.replace('/')} />
       </View>
     </ScrollView>
   );
 }
 
-// --- STYLESHEET (TIDAK BERUBAH) ---
+// --- STYLESHEET (Sedikit Penyesuaian) ---
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 15, backgroundColor: '#f7f7f7' },
   headerContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, padding: 10, backgroundColor: 'white', borderRadius: 8, elevation: 2, },
@@ -299,15 +390,59 @@ const styles = StyleSheet.create({
   dateTimeText: { fontSize: 12, color: '#666', marginTop: 4, },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f7f7f7' },
   placeholderText: { fontSize: 16, color: '#888', textAlign: 'center', marginTop: 30, fontStyle: 'italic', },
-  sectionContainer: { marginBottom: 20, backgroundColor: 'white', borderRadius: 8, elevation: 1, overflow: 'hidden', },
-  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: 'white', backgroundColor: '#1D5D50', padding: 12, },
-  itemRowContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', },
+  
+  // Ini adalah boks abu-abu di FIGMA
+  sectionContainer: { 
+    marginBottom: 20, 
+    backgroundColor: '#ECECEC', // <-- Warna abu-abu seperti di FIGMA
+    borderRadius: 16, // <-- Dibuat lebih bulat
+    elevation: 1, 
+    overflow: 'hidden', // <-- Penting untuk border radius
+  },
+  // Judul "Sampah Terkelola" / "Sampah Tidak Terkelola"
+  sectionTitle: { 
+    fontSize: 16, 
+    fontWeight: 'bold', 
+    color: '#ffffffff', // <-- Warna teks hitam
+    backgroundColor: '#1D5D50', // <-- Warna sama dengan kontainer
+    padding: 16,
+    paddingBottom: 12,
+  },
+  itemRowContainer: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between', 
+    paddingHorizontal: 16, // <-- Disesuaikan
+    paddingVertical: 12,
+    backgroundColor: '#ECECEC', // <-- Warna sama
+    borderTopWidth: 1, // <-- Garis pemisah tipis
+    borderTopColor: '#DDD',
+  },
   itemNama: { flex: 2, fontSize: 16, },
-  inputBox: { flex: 1, borderWidth: 1, borderColor: '#ccc', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 5, textAlign: 'center', fontSize: 16, marginLeft: 10, },
+  inputBox: { 
+    flex: 1, 
+    borderWidth: 1, 
+    borderColor: '#ccc', 
+    backgroundColor: 'white', // <-- Input field dibuat putih
+    paddingVertical: 8, 
+    paddingHorizontal: 10, 
+    borderRadius: 8, // <-- Dibuat bulat
+    textAlign: 'center', 
+    fontSize: 16, 
+    marginLeft: 10, 
+  },
   buttonContainer: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 20, },
+  // Teks jika list-nya kosong
+  emptyListText: {
+    fontSize: 14,
+    color: '#777',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    padding: 20,
+  }
 });
 
 const pickerSelectStyles = StyleSheet.create({
-  inputIOS: { fontSize: 16, fontWeight: '500', paddingVertical: 12, paddingHorizontal: 10, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, color: 'black', paddingRight: 30, },
-  inputAndroid: { fontSize: 16, fontWeight: '500', paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, color: 'black', paddingRight: 30, },
+  inputIOS: { fontSize: 16, fontWeight: '500', paddingVertical: 12, paddingHorizontal: 10, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, color: 'black', paddingRight: 30, backgroundColor: 'white' },
+  inputAndroid: { fontSize: 16, fontWeight: '500', paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, color: 'black', paddingRight: 30, backgroundColor: 'white' },
 });

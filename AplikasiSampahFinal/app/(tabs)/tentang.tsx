@@ -10,7 +10,7 @@ export default function TentangScreen() {
         <Text style={styles.title}>Tentang Aplikasi Green</Text>
       </View>
       <Text style={styles.paragraph}>
-        Aplikasi <Text style={{fontWeight: 'bold'}}>Green</Text> dirancang untuk mempermudah proses pencatatan sampah harian oleh petugas di lapangan. Dengan aplikasi ini, setiap jenis sampah dapat dicatat beratnya secara akurat, terorganisir berdasarkan kategori (Organik, Non-Organik, dan Residu).
+        Aplikasi <Text style={{fontWeight: 'bold'}}>Green</Text> dirancang untuk mempermudah proses pencatatan sampah harian oleh petugas di lapangan. Dengan aplikasi ini, setiap jenis sampah dapat dicatat beratnya secara akurat, terorganisir berdasarkan kategori Sampah Terkelola Dan Tidak Terkelola.
       </Text>
       <Text style={styles.paragraph}>
         Data yang terkumpul dapat diekspor ke dalam format CSV, menyediakan laporan yang terstruktur untuk analisis lebih lanjut. Tujuan utama kami adalah mendukung manajemen sampah yang lebih efisien dan berbasis data untuk lingkungan yang lebih bersih dan sehat.

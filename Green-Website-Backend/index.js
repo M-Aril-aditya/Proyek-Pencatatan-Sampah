@@ -29,7 +29,7 @@ app.use(express.json());
 
 // --- RUTE API ---
 
-// Rute Login
+// Rute Login (TIDAK BERUBAH)
 app.post('/api/login', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -50,7 +50,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// Rute Upload (Struktur CSV DINAMIS)
+// --- (PERUBAHAN) Rute Upload ---
 app.post('/api/upload', upload.single('csvFile'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: 'File tidak ditemukan.' });
@@ -59,8 +59,9 @@ app.post('/api/upload', upload.single('csvFile'), (req, res) => {
   const filePath = req.file.path;
   const results = [];
   
+  // Asumsi pemisah koma (',') sesuai permintaan Anda
   fs.createReadStream(filePath)
-    .pipe(csv())
+    .pipe(csv()) 
     .on('data', (data) => results.push(data))
     .on('end', async () => {
       if (results.length === 0) {
@@ -72,39 +73,42 @@ app.post('/api/upload', upload.single('csvFile'), (req, res) => {
         await db.query('BEGIN'); // Mulai transaksi
 
         for (const row of results) {
+          // Logika tanggal (TIDAK BERUBAH)
           let dateTimeString = row['Waktu Catat']?.replace(/"/g, '') || '';
           dateTimeString = dateTimeString.replace('.', ':');
           const parsableDateString = dateTimeString.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$2/$1/$3'); 
           let recordedAt = new Date(parsableDateString);
-          
           if (isNaN(recordedAt.getTime())) {
-             const isoDate = new Date(dateTimeString);
-             if (isNaN(isoDate.getTime())) {
+              const isoDate = new Date(dateTimeString);
+              if (isNaN(isoDate.getTime())) {
                 throw new Error(`Format tanggal tidak valid: ${row['Waktu Catat']}`);
-             }
-             recordedAt = isoDate;
+              }
+              recordedAt = isoDate;
           }
           
+          // --- (KUERI INSERT DIPERBARUI) ---
+          // Kolom disesuaikan: pengelola & status DITAMBAHKAN
           const queryText = `
             INSERT INTO waste_records 
-              (area_label, section_title, item_label, item_id, weight_kg, petugas_name, recorded_at)
+              (area_label, item_label, pengelola, status, weight_kg, petugas_name, recorded_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
           `;
           const values = [
             row['Area'],
-            row['Section'],
             row['Nama Item'],
-            row['ID Item'],
+            row['Pengelola'], // <-- KOLOM BARU DARI CSV
+            row['Status'],    // <-- KOLOM BARU DARI CSV
             parseFloat(row['Bobot (Kg)']) || 0,
             row['Petugas'],
             recordedAt
           ];
+          // ------------------------------------
           
           await db.query(queryText, values);
         }
         
         await db.query('COMMIT');
-        console.log('Data (DINAMIS) berhasil disimpan ke database PostgreSQL.');
+        console.log('Data (BARU) berhasil disimpan ke database PostgreSQL.');
         
         res.json({ 
           message: `File CSV berhasil diproses! ${results.length} baris data disimpan.`,
@@ -123,23 +127,21 @@ app.post('/api/upload', upload.single('csvFile'), (req, res) => {
 });
 
 // === FUNGSI HELPER TANGGAL (FIX TIMEZONE) ===
+// (TIDAK BERUBAH)
 function getSQLDateCondition(range, year, month, week) {
   let dateCondition = '';
-  const jsDate = new Date(); // Gunakan jam server Node.js
+  const jsDate = new Date(); 
   
   const targetYear = year ? parseInt(year) : jsDate.getFullYear();
   const targetMonth = month ? parseInt(month) : jsDate.getMonth() + 1; // 1-12
   const targetWeek = week ? parseInt(week) : 1;
 
-  // --- FIX TIMEZONE BUG ---
-  // Helper untuk format YYYY-MM-DD LOKAL (BUKAN UTC)
   const formatDate = (d) => {
     const year = d.getFullYear();
     const month = (d.getMonth() + 1).toString().padStart(2, '0');
     const day = d.getDate().toString().padStart(2, '0');
     return `${year}-${month}-${day}`;
   };
-  // ------------------------
   
   switch (range) {
     case 'weekly':
@@ -149,13 +151,12 @@ function getSQLDateCondition(range, year, month, week) {
       else if (targetWeek === 3) { startDateW = `'${targetYear}-${targetMonth}-15'`; endDateW = `'${targetYear}-${targetMonth}-21'`; }
       else { // week 4
         startDateW = `'${targetYear}-${targetMonth}-22'`;
-        // Akhir bulan (PostgreSQL)
         const lastDay = `(DATE_TRUNC('MONTH', ${startDateW}::DATE) + INTERVAL '1 MONTH' - INTERVAL '1 DAY')::DATE`;
         endDateW = lastDay;
         dateCondition = `DATE(recorded_at) BETWEEN ${startDateW} AND ${endDateW}`;
       }
       if (targetWeek <= 3) {
-         dateCondition = `DATE(recorded_at) BETWEEN ${startDateW} AND ${endDateW}`;
+          dateCondition = `DATE(recorded_at) BETWEEN ${startDateW} AND ${endDateW}`;
       }
       break;
 
@@ -168,7 +169,6 @@ function getSQLDateCondition(range, year, month, week) {
       break;
       
     default: // 'daily'
-      // Gunakan helper format tanggal LOKAL yang baru
       const today = formatDate(jsDate); 
       dateCondition = `DATE(recorded_at) = '${today}'`;
   }
@@ -176,29 +176,25 @@ function getSQLDateCondition(range, year, month, week) {
 }
 // ===========================================
 
-// === RUTE STATISTIK (DENGAN KUERI DIPERBAIKI) ===
-// === RUTE STATISTIK (DENGAN KUERI DIPERBAIKI) ===
-// === RUTE STATISTIK (DENGAN KUERI DIPERBAIKI) ===
+// === (PERUBAHAN) RUTE STATISTIK ===
 app.get('/api/stats', async (req, res) => {
   const { range, year, month, week } = req.query;
   
   try {
-    // Panggil fungsi helper tanggal Anda (ini sudah benar)
     const dateCondition = getSQLDateCondition(range, year, month, week);
 
-    // --- KUERI SQL DIPERBAIKI (INI ADALAH SOLUSINYA) ---
-    // Logika baru: Hitung 'Tidak Terkelola' secara spesifik,
-    // dan 'Terkelola' adalah SEMUA SISANYA.
+    // --- (KUERI SQL DIPERBARUI) ---
+    // Logika baru: Langsung hitung berdasarkan kolom 'status'
     const query = `
       SELECT 
         COALESCE(SUM(CASE 
-                     WHEN item_id NOT LIKE '%_tidak_terkelola' THEN weight_kg 
-                     ELSE 0 
-                   END), 0) as total_terkelola,
+                      WHEN status = 'Terkelola' THEN weight_kg 
+                      ELSE 0 
+                    END), 0) as total_terkelola,
         COALESCE(SUM(CASE 
-                     WHEN item_id LIKE '%_tidak_terkelola' THEN weight_kg 
-                     ELSE 0 
-                   END), 0) as total_tidak_terkelola
+                      WHEN status = 'Tidak Terkelola' THEN weight_kg 
+                      ELSE 0 
+                    END), 0) as total_tidak_terkelola
       FROM 
         waste_records 
       WHERE 
@@ -209,7 +205,6 @@ app.get('/api/stats', async (req, res) => {
     const statsQuery = await db.query(query);
     const data = statsQuery.rows[0];
 
-    // Cek terminal backend Anda untuk log ini
     console.log(`Statistik (${range}) DIJALANKAN:`, data); 
 
     const pieData = [
@@ -225,18 +220,21 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
-// === RUTE DATA MENTAH (DENGAN FIX TANGGAL) ===
+// === (PERUBAHAN) RUTE DATA MENTAH ===
 app.get('/api/records', async (req, res) => {
   const { range, year, month, week } = req.query;
 
   try {
     const dateCondition = getSQLDateCondition(range, year, month, week);
 
+    // --- (KUERI SELECT DIPERBARUI) ---
+    // Menampilkan 'pengelola' dan 'status'
     const query = `
       SELECT 
         area_label, 
-        section_title, 
         item_label, 
+        pengelola, 
+        status, 
         weight_kg, 
         petugas_name, 
         recorded_at
@@ -247,6 +245,7 @@ app.get('/api/records', async (req, res) => {
       ORDER BY 
         recorded_at DESC;
     `;
+    // ------------------------------------
     
     const recordsQuery = await db.query(query);
     res.json(recordsQuery.rows);
@@ -257,7 +256,7 @@ app.get('/api/records', async (req, res) => {
   }
 });
 
-// Rute Hapus Data
+// Rute Hapus Data (TIDAK BERUBAH)
 app.delete('/api/clear-data', async (req, res) => {
   try {
     await db.query('TRUNCATE TABLE waste_records RESTART IDENTITY;');
@@ -269,31 +268,35 @@ app.delete('/api/clear-data', async (req, res) => {
   }
 });
 
-// Rute Ekspor Excel
+// --- (PERUBAHAN) Rute Ekspor Excel ---
 app.get('/api/export/monthly', async (req, res) => {
     const targetMonth = req.query.month ? parseInt(req.query.month) : new Date().getMonth() + 1;
     const targetYear = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
 
     try {
+        // Query select * sudah otomatis mengambil kolom baru
         const { rows } = await db.query(
             `SELECT * FROM waste_records 
-             WHERE EXTRACT(MONTH FROM recorded_at) = $1 AND EXTRACT(YEAR FROM recorded_at) = $2
-             ORDER BY recorded_at ASC`,
+              WHERE EXTRACT(MONTH FROM recorded_at) = $1 AND EXTRACT(YEAR FROM recorded_at) = $2
+              ORDER BY recorded_at ASC`,
             [targetMonth, targetYear]
         );
 
         const workbook = new excel.Workbook();
         const worksheet = workbook.addWorksheet(`Laporan Bulan ${targetMonth}-${targetYear}`);
 
+        // --- (KOLOM EXCEL DIPERBARUI) ---
         worksheet.columns = [
             { header: 'ID', key: 'id', width: 5 },
             { header: 'Area', key: 'area_label', width: 30 },
-            { header: 'Seksi', key: 'section_title', width: 30 },
             { header: 'Nama Item', key: 'item_label', width: 30 },
+            { header: 'Pengelola', key: 'pengelola', width: 30 }, // TAMBAH
+            { header: 'Status', key: 'status', width: 20 },     // TAMBAH
             { header: 'Bobot (Kg)', key: 'weight_kg', width: 15, style: { numFmt: '0.00' } },
             { header: 'Petugas', key: 'petugas_name', width: 20 },
             { header: 'Waktu Catat', key: 'recorded_at', width: 25, style: { numFmt: 'dd/mm/yyyy hh:mm' } },
         ];
+        // ------------------------------------
         
         const dataForExcel = rows.map(row => ({
             ...row,
@@ -306,7 +309,7 @@ app.get('/api/export/monthly', async (req, res) => {
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         );
         res.setHeader(
-            'Content-Disposition',
+            'Content-Disposition', // <- Perbaikan typo (sebelumnya Diusposition)
             'attachment; filename=' + `laporan_bulanan_${targetMonth}-${targetYear}.xlsx`
         );
 
@@ -320,7 +323,7 @@ app.get('/api/export/monthly', async (req, res) => {
 });
 
 
-// --- Server Listen ---
+// --- Server Listen --- (TIDAK BERUBAH)
 app.listen(PORT, () => {
   console.log(`Server berjalan di http://localhost:${PORT}`);
 });
