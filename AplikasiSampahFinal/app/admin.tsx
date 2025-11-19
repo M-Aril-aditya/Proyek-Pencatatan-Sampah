@@ -1,14 +1,23 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Alert, Button, FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
-import { USER_STORAGE_KEY } from './index'; // Impor key dari halaman login
+import { 
+  Alert, 
+  Button, 
+  FlatList, 
+  StyleSheet, 
+  Text, 
+  TextInput, 
+  View, 
+  TouchableOpacity // <-- 1. Tambahan Import
+} from 'react-native';
+import { USER_STORAGE_KEY } from './index'; 
 
 // Definisikan tipe User
 interface User {
   id: string;
   fullName: string;
-  password?: string; // Password opsional saat ditampilkan
+  password?: string; 
 }
 
 export default function AdminScreen() {
@@ -81,7 +90,18 @@ export default function AdminScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Manajemen Petugas</Text>
+      
+      {/* --- 2. HEADER BARU (Judul Kiri, Logout Kanan) --- */}
+      <View style={styles.topHeaderContainer}>
+        <Text style={styles.title}>Manajemen Petugas</Text>
+        <TouchableOpacity 
+          style={styles.smallLogoutButton} 
+          onPress={() => router.replace('/')}
+        >
+          <Text style={styles.smallLogoutText}>Logout</Text>
+        </TouchableOpacity>
+      </View>
+      {/* ------------------------------------------------ */}
 
       {/* Form Tambah User */}
       <View style={styles.formContainer}>
@@ -112,14 +132,40 @@ export default function AdminScreen() {
         )}
       />
 
-      <Button title="Kembali ke Login" onPress={() => router.replace('/')} />
+      {/* 3. TOMBOL LOGOUT BAWAH DIHAPUS */}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, paddingTop: 60, backgroundColor: '#f0f0f0' },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
+  
+  // --- 4. STYLE BARU UNTUK HEADER ---
+  topHeaderContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  title: { 
+    fontSize: 22, 
+    fontWeight: 'bold', 
+    color: '#333' 
+    // textAlign: 'center' dihapus agar rata kiri
+  },
+  smallLogoutButton: {
+    backgroundColor: '#C0392B', // Merah
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  smallLogoutText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  // ----------------------------------
+
   formContainer: { marginBottom: 20, padding: 15, backgroundColor: 'white', borderRadius: 8 },
   input: {
     borderWidth: 1,
