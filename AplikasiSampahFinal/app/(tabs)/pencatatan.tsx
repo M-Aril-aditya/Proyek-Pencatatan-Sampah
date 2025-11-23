@@ -13,7 +13,7 @@ import {
   Text, 
   TextInput, 
   View,
-  TouchableOpacity // <-- Tambahan Import
+  TouchableOpacity 
 } from 'react-native';
 import RNPickerSelect from 'react-native-picker-select';
 
@@ -21,76 +21,54 @@ import RNPickerSelect from 'react-native-picker-select';
 interface Field {
   id: string;
   label: string;
-  pengelola: string;
+  pengelola: string; 
 }
-interface AreaData {
-  terkelola: Field[];
+
+interface WasteCategories {
+  organik: Field[];
+  anorganik: Field[];
   tidakTerkelola: Field[];
 }
-interface DataStructureType {
-  [key: string]: AreaData;
-}
+
 interface ExportRow {
   area: string;
   item_label: string;
   item_id: string;
   weight: string;
-  status: 'Terkelola' | 'Tidak Terkelola';
+  status: 'Organik Terpilah' | 'Anorganik Terpilah' | 'Tidak Terkelola'; 
   pengelola: string;
 }
 // ------------------------------------
 
 const DAFTAR_AREA = [
-  { label: 'Area Kantor', value: 'area_kantor' },
-  { label: 'Area Parkir / Taman / Jalan', value: 'area_parkir' },
-  { label: 'Area Tempat Makan', value: 'area_tempat_makan' },
-  { label: 'Area Ruang Tunggu', value: 'area_ruang_tunggu' },
+  { label: 'Area Kantor', value: 'Area Kantor' },
+  { label: 'Area Parkir', value: 'Area Parkir' }, 
+  { label: 'Area Makan', value: 'Area Makan' },   
+  { label: 'Area Ruang Tunggu', value: 'Area Ruang Tunggu' },
 ];
 
-// --- STRUKTUR DATA ---
-const DATA_SAMPAH_PER_AREA: DataStructureType = {
-  'area_kantor': {
-    terkelola: [
-      { id: 'kertas_cv', label: 'Kertas', pengelola: 'CV Tunas Baru / Bank Sampah' }, 
-      { id: 'kardus_cv', label: 'Kardus', pengelola: 'CV Tunas Baru / Bank Sampah' }, 
-      { id: 'plastik_cv', label: 'Plastik', pengelola: 'CV Tunas Baru / Bank Sampah' }, 
-      { id: 'duplex_cv', label: 'Duplex', pengelola: 'CV Tunas Baru / Bank Sampah' }, 
-      { id: 'kantung_semen_cv', label: 'Kantung Semen', pengelola: 'CV Tunas Baru' }, 
-    ],
-    tidakTerkelola: [
-      { id: 'sampah_campur', label: 'Sampah Campur', pengelola: '-' }, 
-      { id: 'vial', label: 'Vial', pengelola: '-' }, 
-      { id: 'drum_kardus', label: 'Drum Kardus', pengelola: '-' }, 
-      { id: 'botol', label: 'Botol', pengelola: '-' } 
-    ]
-  },
-  'area_parkir': {
-    terkelola: [],
-    tidakTerkelola: [
-      { id: 'daun_kering', label: 'Daun Kering', pengelola: '-' }, 
-    ]
-  },
-  'area_tempat_makan': {
-    terkelola: [
-      { id: 'gelas_plastik', label: 'Gelas Plastik', pengelola: '-' }, 
-    ], 
-    tidakTerkelola: [
-      { id: 'sampah_kantin_warehouse', label: 'Sampah Kantin Warehouse', pengelola: '-' }, 
-      { id: 'sampah_kantin_pabrik', label: 'Sampah Kantin Pabrik', pengelola: '-' } 
-    ]
-  },
-  'area_ruang_tunggu': {
-    terkelola: [
-      { id: 'organik', label: 'Organik', pengelola: '-' },
-    ],
-    tidakTerkelola: [ 
-      { id: 'anorganik', label: 'Anorganik', pengelola: '-' }, 
-      { id: 'residu', label: 'Residu', pengelola: '-' }, 
-    ]
-  }
+// --- DATA GLOBAL (SERAGAM) ---
+const DATA_SAMPAH_GLOBAL: WasteCategories = {
+  organik: [
+    { id: 'daun_kering', label: 'Daun Kering', pengelola: '-' },
+    { id: 'sampah_makanan', label: 'Sampah Makanan', pengelola: '-' },
+  ],
+  anorganik: [
+    { id: 'kertas', label: 'Kertas', pengelola: '-' },
+    { id: 'kardus', label: 'Kardus', pengelola: '-' },
+    { id: 'plastik', label: 'Plastik', pengelola: '-' },
+    { id: 'duplex', label: 'Duplex', pengelola: '-' },
+    { id: 'kantong_semen', label: 'Kantong Semen', pengelola: '-' },
+  ],
+  tidakTerkelola: [
+    { id: 'vial', label: 'Vial', pengelola: '-' },
+    { id: 'drum_vat', label: 'Drum Vat', pengelola: '-' },
+    { id: 'botol', label: 'Botol', pengelola: '-' },
+    { id: 'residu_lainnya', label: 'Residu Lainnya', pengelola: '-' },
+  ]
 };
 
-const HISTORY_STORAGE_KEY = 'wasteHistory_v3';
+const HISTORY_STORAGE_KEY = 'wasteHistory_v4_revisi'; 
 
 export default function PencatatanScreen() {
   const router = useRouter();
@@ -136,6 +114,16 @@ export default function PencatatanScreen() {
     setBobotSampah(prevState => ({ ...prevState, [id]: cleanedText }));
   };
 
+  // --- (BARU) Fungsi Hapus Input ---
+  const handleClearInput = (id: string) => {
+    setBobotSampah(prevState => {
+      const newState = { ...prevState };
+      delete newState[id]; // Hapus data bobot untuk item ini
+      return newState;
+    });
+  };
+  // --------------------------------
+
   const handleSimpan = async () => {
     Keyboard.dismiss();
     const userKey = user ? user.toString() : null;
@@ -146,16 +134,9 @@ export default function PencatatanScreen() {
     try {
         const allHistoryString = await AsyncStorage.getItem(HISTORY_STORAGE_KEY);
         const allHistory = allHistoryString ? JSON.parse(allHistoryString) : {};
-        
         const existingUserHistory = allHistory[userKey] || {};
-
-        const updatedUserHistory = {
-          ...existingUserHistory,
-          ...bobotSampah
-        };
-        
+        const updatedUserHistory = { ...existingUserHistory, ...bobotSampah };
         allHistory[userKey] = updatedUserHistory; 
-        
         await AsyncStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(allHistory));
         Alert.alert('Tersimpan', 'Data berhasil disimpan sementara di perangkat.');
     } catch (error) {
@@ -166,50 +147,36 @@ export default function PencatatanScreen() {
 
   const handleEkspor = async () => {
       const userKey = user ? user.toString() : null;
-      const areaKey = selectedAreaState as string;
+      const areaName = selectedAreaState; 
       
-      if (!userKey || !areaKey) {
+      if (!userKey || !areaName) {
           Alert.alert('Gagal', 'Pastikan Area dan User sudah teridentifikasi.');
           return;
       }
 
-      const areaData = DATA_SAMPAH_PER_AREA[areaKey];
-      if (!areaData) {
-        Alert.alert('Error', 'Data untuk area ini tidak ditemukan.');
-        return;
-      }
-      
+      const areaData = DATA_SAMPAH_GLOBAL;
       const dataToExport: ExportRow[] = [];
 
-      // 1. Loop data TERKELOLA
-      areaData.terkelola.forEach((field: Field) => {
+      // Helper untuk loop data
+      const collectData = (categoryData: Field[], statusLabel: ExportRow['status']) => {
+        categoryData.forEach((field: Field) => {
           const weight = bobotSampah[field.id];
           if (weight && parseFloat(weight) > 0) {
               dataToExport.push({
-                  area: areaKey,
+                  area: areaName,
                   item_label: field.label,
                   item_id: field.id,
                   weight: weight,
-                  status: 'Terkelola',
+                  status: statusLabel,
                   pengelola: field.pengelola
               });
           }
-      });
+        });
+      };
 
-      // 2. Loop data TIDAK TERKELOLA
-      areaData.tidakTerkelola.forEach((field: Field) => {
-          const weight = bobotSampah[field.id];
-          if (weight && parseFloat(weight) > 0) {
-              dataToExport.push({
-                  area: areaKey,
-                  item_label: field.label,
-                  item_id: field.id,
-                  weight: weight,
-                  status: 'Tidak Terkelola',
-                  pengelola: field.pengelola
-              });
-          }
-      });
+      collectData(areaData.organik, 'Organik Terpilah');
+      collectData(areaData.anorganik, 'Anorganik Terpilah');
+      collectData(areaData.tidakTerkelola, 'Tidak Terkelola');
 
       if (dataToExport.length === 0) {
           Alert.alert('Gagal', 'Tidak ada data bobot sampah yang diisi untuk diekspor.');
@@ -219,7 +186,7 @@ export default function PencatatanScreen() {
       const headerString = 'Area,Nama Item,Pengelola,Status,Bobot (Kg),Petugas,Waktu Catat\n';
       
       const rowString = dataToExport.map((row: ExportRow) => 
-          `"${DAFTAR_AREA.find(a => a.value === row.area)?.label}",` +
+          `"${row.area}",` + 
           `"${row.item_label}",` +
           `"${row.pengelola}",` +
           `"${row.status}",` +
@@ -228,7 +195,7 @@ export default function PencatatanScreen() {
           `"${dateTime}"\n`
       ).join('');
       
-      const csvString = `${headerString}${rowString}`;
+      const csvString = `\uFEFF${headerString}${rowString}`;
       
       const now = new Date();
       const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
@@ -238,7 +205,8 @@ export default function PencatatanScreen() {
       const hours = now.getHours().toString().padStart(2, '0');
       const minutes = now.getMinutes().toString().padStart(2, '0');
       const userName = userKey ? userKey.toLowerCase() : 'unknown';
-      const filename = `green-${userName}-${day}${month}${year}-${hours}${minutes}.csv`;
+      const safeAreaName = areaName.replace(/\s+/g, '_');
+      const filename = `green-${userName}-${safeAreaName}-${day}${month}${year}-${hours}${minutes}.csv`;
       
       const fileUri = (FileSystem as any).documentDirectory + filename;
       try {
@@ -277,45 +245,48 @@ export default function PencatatanScreen() {
       return <Text style={styles.placeholderText}>Silakan pilih area terlebih dahulu...</Text>;
     }
     
-    const areaData = DATA_SAMPAH_PER_AREA[areaKey]; 
-    if (!areaData) {
-      return <Text style={styles.placeholderText}>Struktur data untuk area ini tidak ditemukan.</Text>;
-    }
+    const areaData = DATA_SAMPAH_GLOBAL;
 
     const renderField = (field: Field) => (
       <View key={field.id} style={styles.itemRowContainer}>
         <Text style={styles.itemNama}>{field.label} (Kg)</Text> 
-        <TextInput
-            style={styles.inputBox}
-            keyboardType="decimal-pad"
-            onChangeText={(text) => handleInputChange(field.id, text)}
-            value={bobotSampah[field.id] || ''}
-            placeholder="0.0"
-            placeholderTextColor="#aaa"
-        />
+        
+        {/* Wrapper untuk Input dan Tombol Hapus */}
+        <View style={styles.inputWrapper}>
+          <TextInput
+              style={styles.inputBox}
+              keyboardType="decimal-pad"
+              onChangeText={(text) => handleInputChange(field.id, text)}
+              value={bobotSampah[field.id] || ''}
+              placeholder="0.0"
+              placeholderTextColor="#aaa"
+          />
+          {/* Tombol Hapus (X) */}
+          {bobotSampah[field.id] ? (
+            <TouchableOpacity onPress={() => handleClearInput(field.id)} style={styles.clearButton}>
+              <Text style={styles.clearButtonText}>X</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
       </View>
     );
 
     return (
       <View>
-        {/* --- BOKS 1: SAMPAH TERKELOLA --- */}
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>Sampah Terkelola</Text>
-          {areaData.terkelola.length > 0 ? (
-            areaData.terkelola.map(renderField)
-          ) : (
-            <Text style={styles.emptyListText}>- Tidak ada item -</Text>
-          )}
+          <Text style={[styles.sectionTitle, { backgroundColor: '#27ae60' }]}>Sampah Organik Terpilah</Text>
+          {areaData.organik.map(renderField)}
         </View>
 
-        {/* --- BOKS 2: SAMPAH TIDAK TERKELOLA --- */}
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>Sampah Tidak Terkelola</Text>
-          {areaData.tidakTerkelola.length > 0 ? (
-            areaData.tidakTerkelola.map(renderField)
-          ) : (
-            <Text style={styles.emptyListText}>- Tidak ada item -</Text>
-          )}
+          <Text style={[styles.sectionTitle, { backgroundColor: '#f39c12' }]}>Sampah Anorganik Terpilah</Text>
+          {areaData.anorganik.map(renderField)}
+        </View>
+
+        <View style={styles.sectionContainer}>
+          <Text style={[styles.sectionTitle, { backgroundColor: '#c0392b' }]}>Sampah Tidak Terkelola</Text>
+          {areaData.tidakTerkelola.map(renderField)}
         </View>
       </View>
     );
@@ -333,9 +304,8 @@ export default function PencatatanScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 50 }}>
       
-      {/* --- HEADER BARU (Judul Kiri, Logout Kanan) --- */}
       <View style={styles.topHeaderContainer}>
-        <Text style={styles.screenTitle}>Masukkan Sampah</Text>
+        <Text style={styles.screenTitle}>Input Data</Text>
         <TouchableOpacity 
           style={styles.smallLogoutButton} 
           onPress={() => router.replace('/')}
@@ -344,7 +314,6 @@ export default function PencatatanScreen() {
         </TouchableOpacity>
       </View>
       
-      {/* Header Info User */}
       <View style={styles.headerContainer}>
         <View style={styles.pickerContainer}>
           <RNPickerSelect
@@ -368,8 +337,6 @@ export default function PencatatanScreen() {
         <Button title="Ekspor CSV" onPress={handleEkspor} color="#1E8449" />
       </View>
 
-      {/* TOMBOL LOGOUT BAWAH DIHAPUS */}
-
     </ScrollView>
   );
 }
@@ -377,7 +344,6 @@ export default function PencatatanScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 15, backgroundColor: '#f7f7f7' },
   
-  // --- STYLE BARU UNTUK HEADER ATAS ---
   topHeaderContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -391,7 +357,7 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   smallLogoutButton: {
-    backgroundColor: '#C0392B', // Merah
+    backgroundColor: '#C0392B',
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 8,
@@ -401,7 +367,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 12,
   },
-  // -----------------------------------
 
   headerContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, padding: 10, backgroundColor: 'white', borderRadius: 8, elevation: 2, },
   pickerContainer: { flex: 1.5, marginRight: 10, },
@@ -422,7 +387,6 @@ const styles = StyleSheet.create({
     fontSize: 16, 
     fontWeight: 'bold', 
     color: '#ffffffff', 
-    backgroundColor: '#1D5D50', 
     padding: 16,
     paddingBottom: 12,
   },
@@ -436,9 +400,17 @@ const styles = StyleSheet.create({
     borderTopWidth: 1, 
     borderTopColor: '#DDD',
   },
-  itemNama: { flex: 2, fontSize: 16, },
+  itemNama: { flex: 2, fontSize: 16, maxWidth: '50%' }, // Batasi lebar nama agar input muat
+  
+  // --- STYLE BARU UNTUK INPUT & TOMBOL HAPUS ---
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
   inputBox: { 
-    flex: 1, 
+    width: 80, // Lebar tetap untuk input
     borderWidth: 1, 
     borderColor: '#ccc', 
     backgroundColor: 'white', 
@@ -449,6 +421,22 @@ const styles = StyleSheet.create({
     fontSize: 16, 
     marginLeft: 10, 
   },
+  clearButton: {
+    marginLeft: 8,
+    backgroundColor: '#ffcccc',
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  clearButtonText: {
+    color: '#C0392B',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  // ---------------------------------------------
+
   buttonContainer: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 20, },
   emptyListText: {
     fontSize: 14,

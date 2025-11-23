@@ -3,9 +3,10 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-const COLORS = ['#1D5D50', '#C0392B']; 
+// Warna Baru: Hijau (Organik), Kuning/Oranye (Anorganik), Merah (Residu)
+const COLORS = ['#27ae60', '#f39c12', '#c0392b']; 
 
-// Helper untuk Opsi Dropdown (Sudah Benar)
+// Helper untuk Opsi Dropdown
 const generateYearOptions = () => {
   const currentYear = new Date().getFullYear();
   const years = [];
@@ -37,7 +38,7 @@ function StatsMingguan() {
   const [errorMessage, setErrorMessage] = useState('');
   const [totalWeight, setTotalWeight] = useState(0);
 
-  // State untuk Filter (Sudah Benar)
+  // State untuk Filter
   const jsDate = new Date();
   const dayOfMonth = jsDate.getDate();
   let currentWeekOfMonth = 1;
@@ -49,7 +50,6 @@ function StatsMingguan() {
   const [selectedMonth, setSelectedMonth] = useState(jsDate.getMonth() + 1); 
   const [selectedWeek, setSelectedWeek] = useState(currentWeekOfMonth);
 
-  // --- (INI ADALAH FUNGSI useEffect YANG SUDAH DIPERBAIKI) ---
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
@@ -57,7 +57,6 @@ function StatsMingguan() {
       const token = localStorage.getItem('adminToken');
       if (!token) { navigate('/'); return; }
 
-      // 'params' sekarang dinamis (Sudah Benar)
       const params = { 
         range: 'weekly',
         year: selectedYear,
@@ -67,10 +66,7 @@ function StatsMingguan() {
       const headers = { 'Authorization': `Bearer ${token}` };
       
       try {
-        // --- (PERBAIKAN UTAMA DI SINI) ---
-        // Panggil /api/stats UNTUK PIE CHART
         const statsRequest = axios.get('http://localhost:5000/api/stats', { params, headers });
-        // Panggil /api/records UNTUK TABEL
         const recordsRequest = axios.get('http://localhost:5000/api/records', { params, headers });
 
         const [statsResponse, recordsResponse] = await Promise.all([
@@ -78,18 +74,13 @@ function StatsMingguan() {
           recordsRequest
         ]);
 
-        // Pie chart AMBIL DARI statsResponse
         const newPieData = statsResponse.data;
-        // Tabel AMBIL DARI recordsResponse
         const newTableData = recordsResponse.data;
-
-        // Hitung total HANYA dari data pie
         const newTotal = newPieData.reduce((sum, entry) => sum + entry.value, 0);
 
         setPieData(newPieData);
         setTotalWeight(newTotal);
         setTableData(newTableData); 
-        // --- (AKHIR PERBAIKAN) ---
         
       } catch (error) {
         console.error('Error fetching weekly data:', error);
@@ -99,13 +90,12 @@ function StatsMingguan() {
       }
     };
     fetchData();
-  }, [navigate, selectedYear, selectedMonth, selectedWeek]); // Dependensi sudah benar
+  }, [navigate, selectedYear, selectedMonth, selectedWeek]); 
 
   return (
     <div className="content-section">
       <h2>Statistik Mingguan</h2>
 
-      {/* Filter JSX (Sudah Benar) */}
       <div style={styles.filterContainer}>
         <div style={styles.filterGroup}>
           <label style={styles.filterLabel}>Tahun:</label>
@@ -147,10 +137,9 @@ function StatsMingguan() {
         </div>
       </div>
       
-      {/* Pie Chart JSX (Sudah Benar) */}
       {isLoading ? ( <p>Memuat data...</p> )
       : errorMessage ? ( <p style={{ color: 'red' }}>{errorMessage}</p> )
-      : totalWeight === 0 ? ( <p>Belum ada data untuk periode ini.</p> ) // Pesan jika kosong
+      : totalWeight === 0 ? ( <p>Belum ada data untuk periode ini.</p> )
       : (
         <div style={{ width: '100%', height: 300, marginBottom: '2rem' }}>
           <ResponsiveContainer>
@@ -165,7 +154,6 @@ function StatsMingguan() {
          </div>
        )}
 
-      {/* Tabel Data Mentah JSX (Sudah Benar) */}
       {!isLoading && (
         <div style={styles.previewContainer}>
           <h3 style={styles.previewTitle}>Data Mentah (Minggu Ini)</h3>
@@ -209,7 +197,6 @@ function StatsMingguan() {
   );
 }
 
-// Styles (Sudah Benar)
 const styles = {
   previewContainer: { marginTop: '2rem' },
   previewTitle: { color: '#333' },

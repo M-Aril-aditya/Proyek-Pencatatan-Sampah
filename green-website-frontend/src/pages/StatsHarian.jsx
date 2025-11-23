@@ -3,7 +3,8 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-const COLORS = ['#1D5D50', '#C0392B']; // Hijau (Terkelola), Merah (Tidak Terkelola)
+// Warna Baru: Hijau (Organik), Kuning/Oranye (Anorganik), Merah (Residu)
+const COLORS = ['#27ae60', '#f39c12', '#c0392b']; 
 
 function StatsHarian() {
   const navigate = useNavigate();
@@ -20,50 +21,42 @@ function StatsHarian() {
       const token = localStorage.getItem('adminToken');
       if (!token) { navigate('/'); return; }
 
-      // Parameter yang sama untuk kedua request
+      // Parameter untuk harian (Default: Hari Ini)
       const params = { range: 'daily' };
       const headers = { 'Authorization': `Bearer ${token}` };
       
       try {
-        // --- (PERUBAHAN LOGIKA FETCHING) ---
-        // Kita buat 2 permintaan API secara paralel
-
+        // Panggil /api/stats UNTUK PIE CHART
         const statsRequest = axios.get('http://localhost:5000/api/stats', { params, headers });
+        // Panggil /api/records UNTUK TABEL
         const recordsRequest = axios.get('http://localhost:5000/api/records', { params, headers });
 
-        // Tunggu keduanya selesai
         const [statsResponse, recordsResponse] = await Promise.all([
           statsRequest,
           recordsRequest
         ]);
 
-        // 1. Data untuk Pie Chart (langsung dari /api/stats)
-        const newPieData = statsResponse.data; // Ini adalah array [ { name, value }, { name, value } ]
-        
-        // 2. Data untuk Tabel (langsung dari /api/records)
+        // Pie chart AMBIL DARI statsResponse
+        const newPieData = statsResponse.data;
+        // Tabel AMBIL DARI recordsResponse
         const newTableData = recordsResponse.data;
 
-        // Hitung total bobot HANYA dari data pie
+        // Hitung total HANYA dari data pie
         const newTotal = newPieData.reduce((sum, entry) => sum + entry.value, 0);
 
         setPieData(newPieData);
         setTotalWeight(newTotal);
         setTableData(newTableData); 
-        // --- (AKHIR PERUBAHAN LOGIKA) ---
         
       } catch (error) {
         console.error('Error fetching daily data:', error);
-        if (error.response) {
-          console.error('Data error:', error.response.data);
-          console.error('Status error:', error.response.status);
-        }
         setErrorMessage('Gagal mengambil data statistik harian.');
       } finally {
         setIsLoading(false);
       }
     };
     fetchData();
-  }, [navigate]); // Dependensi 'navigate' sudah benar
+  }, [navigate]);
 
   return (
     <div className="content-section">
@@ -73,7 +66,6 @@ function StatsHarian() {
       : errorMessage ? ( <p style={{ color: 'red' }}>{errorMessage}</p> )
       : totalWeight === 0 ? ( <p>Belum ada data untuk hari ini.</p> )
       : (
-        // --- (BAGIAN PIE CHART TIDAK BERUBAH) ---
         <div style={{ width: '100%', height: 300, marginBottom: '2rem' }}>
           <ResponsiveContainer>
             <PieChart>
@@ -98,19 +90,17 @@ function StatsHarian() {
         </div>
       )}
 
-      {/* --- (PERUBAHAN PADA TABEL DATA MENTAH) --- */}
       {!isLoading && (
         <div style={styles.previewContainer}>
-          <h3 style={styles.previewTitle}>Data Mentah</h3>
+          <h3 style={styles.previewTitle}>Data Mentah (Hari Ini)</h3>
           <div style={styles.tableWrapper}>
             <table style={styles.table}>
               <thead>
                 <tr>
                   <th style={styles.th}>Area</th>
-                  {/* <th style={styles.th}>Seksi</th> <-- DIHAPUS */ }
                   <th style={styles.th}>Nama Item</th>
-                  <th style={styles.th}>Pengelola</th> {/* <-- DITAMBAH */}
-                  <th style={styles.th}>Status</th>     {/* <-- DITAMBAH */}
+                  <th style={styles.th}>Pengelola</th> {/* <-- Kolom Baru */}
+                  <th style={styles.th}>Status</th>     {/* <-- Kolom Baru */}
                   <th style={styles.th}>Bobot (Kg)</th>
                   <th style={styles.th}>Petugas</th>
                   <th style={styles.th}>Waktu Catat</th>
@@ -121,10 +111,9 @@ function StatsHarian() {
                   tableData.map((row, index) => (
                     <tr key={index}>
                       <td style={styles.td}>{row.area_label}</td>
-                      {/* <td style={styles.td}>{row.section_title}</td> <-- DIHAPUS */ }
                       <td style={styles.td}>{row.item_label}</td>
-                      <td style={styles.td}>{row.pengelola}</td> {/* <-- DITAMBAH */}
-                      <td style={styles.td}>{row.status}</td>     {/* <-- DITAMBAH */}
+                      <td style={styles.td}>{row.pengelola}</td> {/* <-- Data Baru */}
+                      <td style={styles.td}>{row.status}</td>     {/* <-- Data Baru */}
                       <td style={styles.td}>{parseFloat(row.weight_kg).toFixed(2)}</td>
                       <td style={styles.td}>{row.petugas_name}</td>
                       <td style={styles.td}>{new Date(row.recorded_at).toLocaleString('id-ID')}</td>
@@ -132,7 +121,6 @@ function StatsHarian() {
                   ))
                 ) : (
                   <tr>
-                    {/* colSpan sekarang 7 (karena ada 7 kolom) */}
                     <td colSpan="7" style={{ ...styles.td, textAlign: 'center' }}>Tidak ada data mentah.</td>
                   </tr>
                 )}
@@ -145,7 +133,6 @@ function StatsHarian() {
   );
 }
 
-// Objek Styles (TIDAK BERUBAH)
 const styles = {
   previewContainer: { marginTop: '2rem' },
   previewTitle: { color: '#333' },

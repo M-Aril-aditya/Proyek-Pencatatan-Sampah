@@ -3,13 +3,14 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-const COLORS = ['#1D5D50', '#C0392B']; 
+// Warna Baru: Hijau (Organik), Kuning/Oranye (Anorganik), Merah (Residu)
+const COLORS = ['#27ae60', '#f39c12', '#c0392b']; 
 
 // Helper untuk Opsi Dropdown Tahun
 const generateYearOptions = () => {
   const currentYear = new Date().getFullYear();
   const years = [];
-  for (let i = currentYear; i >= 2023; i--) { // Mulai dari 2023 (atau sesuaikan)
+  for (let i = currentYear; i >= 2023; i--) { 
     years.push(i);
   }
   return years;
@@ -28,7 +29,6 @@ function StatsTahunan() {
   const jsDate = new Date();
   const [selectedYear, setSelectedYear] = useState(jsDate.getFullYear());
 
-  // --- (FUNGSI useEffect YANG SUDAH DIPERBAIKI) ---
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
@@ -43,9 +43,7 @@ function StatsTahunan() {
       const headers = { 'Authorization': `Bearer ${token}` };
       
       try {
-        // Panggil /api/stats UNTUK PIE CHART
         const statsRequest = axios.get('http://localhost:5000/api/stats', { params, headers });
-        // Panggil /api/records UNTUK TABEL
         const recordsRequest = axios.get('http://localhost:5000/api/records', { params, headers });
 
         const [statsResponse, recordsResponse] = await Promise.all([
@@ -53,12 +51,8 @@ function StatsTahunan() {
           recordsRequest
         ]);
 
-        // Pie chart AMBIL DARI statsResponse
         const newPieData = statsResponse.data;
-        // Tabel AMBIL DARI recordsResponse
         const newTableData = recordsResponse.data;
-
-        // Hitung total HANYA dari data pie
         const newTotal = newPieData.reduce((sum, entry) => sum + entry.value, 0);
 
         setPieData(newPieData);
@@ -73,11 +67,9 @@ function StatsTahunan() {
       }
     };
     fetchData();
-  }, [navigate, selectedYear]); // Dependensi sudah benar
+  }, [navigate, selectedYear]); 
 
-  // --- (FUNGSI handleExport YANG SUDAH DIPERBAIKI) ---
-  
-  // Fungsi loadScript (diperlukan untuk ekspor frontend)
+  // Helper Load Script untuk Export (Karena backend belum ada rute tahunan)
   const loadScript = (src) => {
     return new Promise((resolve, reject) => {
       if (document.querySelector(`script[src="${src}"]`)) {
@@ -91,7 +83,6 @@ function StatsTahunan() {
     });
   };
 
-  // handleExport yang memformat data dengan benar
   const handleExport = async () => {
     setIsExporting(true);
     setErrorMessage('');
@@ -102,7 +93,6 @@ function StatsTahunan() {
         throw new Error('XLSX library not loaded.');
       }
 
-      // Format data dengan kolom yang benar
       const dataToExport = tableData.map(row => ({
         'Area': row.area_label,
         'Nama Item': row.item_label,
@@ -131,7 +121,6 @@ function StatsTahunan() {
     <div className="content-section">
       <h2>Statistik Tahunan</h2>
 
-      {/* Filter JSX */}
       <div style={styles.filterContainer}>
         <div style={styles.filterGroup}>
           <label style={styles.filterLabel}>Tahun:</label>
@@ -147,7 +136,6 @@ function StatsTahunan() {
         </div>
       </div>
       
-      {/* Pie Chart JSX */}
       {isLoading ? ( <p>Memuat data...</p> )
       : errorMessage ? ( <p style={{ color: 'red' }}>{errorMessage}</p> )
       : totalWeight === 0 ? ( <p>Belum ada data untuk periode ini.</p> )
@@ -165,7 +153,6 @@ function StatsTahunan() {
          </div>
        )}
 
-      {/* Tabel Data Mentah JSX */}
       {!isLoading && (
         <div style={styles.previewContainer}>
           <div style={styles.tableHeaderContainer}>
@@ -176,7 +163,6 @@ function StatsTahunan() {
           </div>
           <div style={styles.tableWrapper}>
             <table style={styles.table}>
-              {/* Kolom tabel sudah benar */}
               <thead>
                 <tr>
                   <th style={styles.th}>Area</th>
@@ -215,7 +201,6 @@ function StatsTahunan() {
   );
 }
 
-// Styles
 const styles = {
   previewContainer: { marginTop: '2rem' },
   previewTitle: { color: '#333', margin: 0 }, 

@@ -3,13 +3,14 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-const COLORS = ['#1D5D50', '#C0392B']; 
+// Warna Baru: Hijau (Organik), Kuning/Oranye (Anorganik), Merah (Residu)
+const COLORS = ['#27ae60', '#f39c12', '#c0392b']; 
 
 // Helper untuk Opsi Dropdown
 const generateYearOptions = () => {
   const currentYear = new Date().getFullYear();
   const years = [];
-  for (let i = currentYear; i >= 2023; i--) { // Mulai dari 2023 (atau sesuaikan)
+  for (let i = currentYear; i >= 2023; i--) { 
     years.push(i);
   }
   return years;
@@ -35,9 +36,8 @@ function StatsBulanan() {
   // State untuk Filter
   const jsDate = new Date();
   const [selectedYear, setSelectedYear] = useState(jsDate.getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState(jsDate.getMonth() + 1); // 1-12
+  const [selectedMonth, setSelectedMonth] = useState(jsDate.getMonth() + 1); 
 
-  // --- (INI ADALAH FUNGSI useEffect YANG SUDAH DIPERBAIKI) ---
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
@@ -53,9 +53,7 @@ function StatsBulanan() {
       const headers = { 'Authorization': `Bearer ${token}` };
       
       try {
-        // Panggil /api/stats UNTUK PIE CHART
         const statsRequest = axios.get('http://localhost:5000/api/stats', { params, headers });
-        // Panggil /api/records UNTUK TABEL
         const recordsRequest = axios.get('http://localhost:5000/api/records', { params, headers });
 
         const [statsResponse, recordsResponse] = await Promise.all([
@@ -63,12 +61,8 @@ function StatsBulanan() {
           recordsRequest
         ]);
 
-        // Pie chart AMBIL DARI statsResponse
         const newPieData = statsResponse.data;
-        // Tabel AMBIL DARI recordsResponse
         const newTableData = recordsResponse.data;
-
-        // Hitung total HANYA dari data pie
         const newTotal = newPieData.reduce((sum, entry) => sum + entry.value, 0);
 
         setPieData(newPieData);
@@ -83,9 +77,8 @@ function StatsBulanan() {
       }
     };
     fetchData();
-  }, [navigate, selectedYear, selectedMonth]); // Dependensi sudah benar
+  }, [navigate, selectedYear, selectedMonth]); 
 
-  // handleExport yang memanggil Backend (Sudah Benar)
   const handleExport = async () => {
     setIsExporting(true);
     setErrorMessage('');
@@ -132,7 +125,6 @@ function StatsBulanan() {
     <div className="content-section">
       <h2>Statistik Bulanan</h2>
 
-      {/* Filter JSX (Sudah Benar) */}
       <div style={styles.filterContainer}>
         <div style={styles.filterGroup}>
           <label style={styles.filterLabel}>Tahun:</label>
@@ -161,7 +153,6 @@ function StatsBulanan() {
         </div>
       </div>
       
-      {/* Pie Chart JSX (Sudah Benar) */}
       {isLoading ? ( <p>Memuat data...</p> )
       : errorMessage ? ( <p style={{ color: 'red' }}>{errorMessage}</p> )
       : totalWeight === 0 ? ( <p>Belum ada data untuk periode ini.</p> )
@@ -179,7 +170,6 @@ function StatsBulanan() {
          </div>
        )}
 
-      {/* Tabel Data Mentah JSX (Sudah Benar) */}
       {!isLoading && (
         <div style={styles.previewContainer}>
           <div style={styles.tableHeaderContainer}>
@@ -228,7 +218,6 @@ function StatsBulanan() {
   );
 }
 
-// Styles (Sudah Benar)
 const styles = {
   previewContainer: { marginTop: '2rem' },
   previewTitle: { color: '#333', margin: 0 }, 
