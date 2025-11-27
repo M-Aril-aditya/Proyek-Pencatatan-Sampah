@@ -51,76 +51,103 @@ app.post('/api/login', async (req, res) => {
 });
 
 // Rute Upload (Fix BOM)
-app.post('/api/upload', upload.single('csvFile'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ message: 'File tidak ditemukan.' });
+// --- RUTE UPLOAD MULTI-FILE (BULK UPLOAD) ---
+app.post('/api/upload', upload.array('csvFiles'), async (req, res) => { // Perhatikan: 'csvFiles' (jamak)
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ message: 'Tidak ada file yang diunggah.' });
   }
 
-  const filePath = req.file.path;
-  const results = [];
-  
-  fs.createReadStream(filePath)
-    .pipe(csv({
-        mapHeaders: ({ header, index }) => {
-            return header.trim().replace(/^\uFEFF/, '');
-        }
-    })) 
-    .on('data', (data) => results.push(data))
-    .on('end', async () => {
-      if (results.length === 0) {
-        fs.unlinkSync(filePath);
-        return res.status(400).json({ message: 'File CSV kosong atau format salah.' });
-      }
-      
-      try {
-        await db.query('BEGIN'); 
+  const resultsSummary = {
+    success: [],
+    failed: [],
+    totalRows: 0
+  };
 
-        for (const row of results) {
-          let dateTimeString = row['Waktu Catat']?.replace(/"/g, '') || '';
-          dateTimeString = dateTimeString.replace('.', ':');
-          const parsableDateString = dateTimeString.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$2/$1/$3'); 
-          let recordedAt = new Date(parsableDateString);
-          if (isNaN(recordedAt.getTime())) {
-              const isoDate = new Date(dateTimeString);
-              if (isNaN(isoDate.getTime())) {
-                throw new Error(`Format tanggal tidak valid: ${row['Waktu Catat']}`);
-              }
-              recordedAt = isoDate;
-          }
-          
-          const queryText = `
-            INSERT INTO waste_records 
-              (area_label, item_label, pengelola, status, weight_kg, petugas_name, recorded_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-          `;
-          const values = [
-            row['Area'],
-            row['Nama Item'],
-            row['Pengelola'],
-            row['Status'],
-            parseFloat(row['Bobot (Kg)']) || 0,
-            row['Petugas'],
-            recordedAt
-          ];
-          
-          await db.query(queryText, values);
-        }
-        
-        await db.query('COMMIT');
-        res.json({ 
-          message: `File CSV berhasil diproses! ${results.length} baris data disimpan.`,
-          previewData: results 
+  // Helper function untuk memproses satu file (dibungkus Promise)
+  const processFile = (file) => {
+    return new Promise((resolve, reject) => {
+      const rowData = [];
+      
+      fs.createReadStream(file.path)
+        .pipe(csv({
+            mapHeaders: ({ header }) => header.trim().replace(/^\uFEFF/, '') // Fix BOM
+        }))
+        .on('data', (data) => rowData.push(data))
+        .on('error', (err) => reject(err))
+        .on('end', async () => {
+            if (rowData.length === 0) {
+               fs.unlinkSync(file.path);
+               return resolve({ status: 'error', file: file.originalname, reason: 'File kosong' });
+            }
+
+            const client = await db.connect(); // Ambil koneksi dari pool
+            try {
+                await client.query('BEGIN'); // Transaksi per file
+
+                for (const row of rowData) {
+                    let dateTimeString = row['Waktu Catat']?.replace(/"/g, '') || '';
+                    dateTimeString = dateTimeString.replace('.', ':');
+                    const parsableDateString = dateTimeString.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$2/$1/$3'); 
+                    
+                    let recordedAt = new Date(parsableDateString);
+                    if (isNaN(recordedAt.getTime())) {
+                        const isoDate = new Date(dateTimeString);
+                        if (!isNaN(isoDate.getTime())) recordedAt = isoDate;
+                    }
+
+                    const queryText = `
+                        INSERT INTO waste_records 
+                        (area_label, item_label, pengelola, status, weight_kg, petugas_name, recorded_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    `;
+                    const values = [
+                        row['Area'], row['Nama Item'], row['Pengelola'],
+                        row['Status'], parseFloat(row['Bobot (Kg)']) || 0,
+                        row['Petugas'], recordedAt
+                    ];
+                    await client.query(queryText, values);
+                }
+
+                await client.query('COMMIT');
+                fs.unlinkSync(file.path); // Hapus file temp
+                resolve({ status: 'success', file: file.originalname, count: rowData.length });
+
+            } catch (dbError) {
+                await client.query('ROLLBACK');
+                fs.unlinkSync(file.path);
+                resolve({ status: 'error', file: file.originalname, reason: dbError.message });
+            } finally {
+                client.release(); // Lepas koneksi
+            }
         });
-
-      } catch (dbError) {
-        await db.query('ROLLBACK');
-        console.error('Error saat menyimpan ke DB:', dbError.message);
-        res.status(500).json({ message: `Gagal menyimpan data ke database. Error: ${dbError.message}` });
-      
-      } finally {
-        fs.unlinkSync(filePath);
-      }
     });
+  };
+
+  // Loop proses semua file secara parallel
+  try {
+    const promises = req.files.map(file => processFile(file));
+    const results = await Promise.all(promises);
+
+    results.forEach(r => {
+        if (r.status === 'success') {
+            resultsSummary.success.push(r.file);
+            resultsSummary.totalRows += r.count;
+        } else {
+            resultsSummary.failed.push(`${r.file} (${r.reason})`);
+        }
+    });
+
+    let message = `Berhasil memproses ${resultsSummary.success.length} file (${resultsSummary.totalRows} data).`;
+    if (resultsSummary.failed.length > 0) {
+        message += ` Gagal: ${resultsSummary.failed.join(', ')}`;
+    }
+
+    res.json({ message, previewData: [] }); // Preview data kita kosongkan agar tidak terlalu berat
+
+  } catch (err) {
+    console.error('System Error:', err);
+    res.status(500).json({ message: 'Terjadi kesalahan sistem saat upload.' });
+  }
 });
 
 // Helper Tanggal

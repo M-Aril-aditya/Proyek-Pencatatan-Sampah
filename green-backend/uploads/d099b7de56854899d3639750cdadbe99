@@ -1,0 +1,11 @@
+﻿Area,Nama Item,Pengelola,Status,Bobot (Kg),Petugas,Waktu Catat
+"Area Makan","Daun Kering","-","Organik Terpilah",15,"Budi","28/11/2025 04.48"
+"Area Makan","Sampah Makanan","-","Organik Terpilah",15,"Budi","28/11/2025 04.48"
+"Area Makan","Kertas","-","Anorganik Terpilah",8,"Budi","28/11/2025 04.48"
+"Area Makan","Kardus","-","Anorganik Terpilah",8,"Budi","28/11/2025 04.48"
+"Area Makan","Plastik","-","Anorganik Terpilah",8,"Budi","28/11/2025 04.48"
+"Area Makan","Duplex","-","Anorganik Terpilah",8,"Budi","28/11/2025 04.48"
+"Area Makan","Kantong Semen","-","Anorganik Terpilah",8,"Budi","28/11/2025 04.48"
+"Area Makan","Vial","-","Tidak Terkelola",10,"Budi","28/11/2025 04.48"
+"Area Makan","Drum Vat","-","Tidak Terkelola",10,"Budi","28/11/2025 04.48"
+"Area Makan","Botol","-","Tidak Terkelola",10,"Budi","28/11/2025 04.48"

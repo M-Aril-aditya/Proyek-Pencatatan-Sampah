@@ -4,62 +4,78 @@ import { useNavigate } from 'react-router-dom';
 
 function UploadCSV() {
   const navigate = useNavigate();
-  const [selectedFile, setSelectedFile] = useState(null);
+  
+  // State sekarang menampung Array (List) File
+  const [selectedFiles, setSelectedFiles] = useState([]); 
   const [uploadMessage, setUploadMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-  const [previewData, setPreviewData] = useState([]);
-  
-  // (BARU) State untuk styling drag-over
-  const [isDragging, setIsDragging] = useState(false); 
+  const [isDragging, setIsDragging] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   
   const fileInputRef = useRef(null); 
 
-  // (DIUBAH) handleFileChange sekarang jadi pusat
-  const handleFileSelect = (file) => {
-    if (file && file.type === 'text/csv') {
-      setSelectedFile(file);
-      setUploadMessage('');
-      setErrorMessage('');
-      setPreviewData([]);
-    } else {
-      setErrorMessage('Hanya file .csv yang diizinkan.');
-      setSelectedFile(null);
-    }
+  // Handler saat file dipilih (dari Drag atau Klik)
+  const handleFileSelect = (newFiles) => {
+    const validFiles = [];
+    let errorMsg = '';
+
+    // Validasi tipe file
+    Array.from(newFiles).forEach(file => {
+      if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
+        // Cek duplikasi (opsional)
+        const isDuplicate = selectedFiles.some(f => f.name === file.name);
+        if (!isDuplicate) {
+            validFiles.push(file);
+        }
+      } else {
+        errorMsg = 'Hanya file .csv yang diizinkan.';
+      }
+    });
+
+    if (errorMsg) setErrorMessage(errorMsg);
+    
+    // Gabungkan file baru dengan file yang sudah ada di list
+    setSelectedFiles(prev => [...prev, ...validFiles]);
+    setUploadMessage('');
   };
   
-  // (BARU) Handler untuk klik manual
+  // Handler Hapus File dari List
+  const handleRemoveFile = (indexToRemove) => {
+    setSelectedFiles(prev => prev.filter((_, index) => index !== indexToRemove));
+  };
+
   const handleDropzoneClick = () => {
     fileInputRef.current.click();
   };
   
-  // (BARU) Handler untuk event drag
   const handleDragOver = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault(); e.stopPropagation();
     setIsDragging(true);
   };
   const handleDragLeave = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault(); e.stopPropagation();
     setIsDragging(false);
   };
   const handleDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault(); e.stopPropagation();
     setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    handleFileSelect(file);
+    handleFileSelect(e.dataTransfer.files);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedFile) {
-      setErrorMessage('Silakan pilih file CSV terlebih dahulu.');
+    if (selectedFiles.length === 0) {
+      setErrorMessage('Silakan pilih minimal satu file CSV.');
       return;
     }
-    // ... (Logika handleSubmit Anda sudah benar, TIDAK PERLU DIUBAH) ...
+
+    setIsUploading(true);
     const formData = new FormData();
-    formData.append('csvFile', selectedFile);
+    
+    // Append semua file ke FormData dengan nama 'csvFiles'
+    selectedFiles.forEach(file => {
+        formData.append('csvFiles', file);
+    });
 
     try {
       const token = localStorage.getItem('adminToken');
@@ -78,43 +94,31 @@ function UploadCSV() {
       
       setUploadMessage(response.data.message);
       setErrorMessage('');
-      setPreviewData(response.data.previewData || []);
-      setSelectedFile(null); // Kosongkan state
+      setSelectedFiles([]); // Bersihkan list setelah sukses
+      
+      if (fileInputRef.current) fileInputRef.current.value = "";
 
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
     } catch (error) {
       console.error('Error saat upload:', error);
       if (error.response) {
         setErrorMessage('Upload Gagal: '.concat(error.response.data.message));
-      } else if (error.request) {
-        setErrorMessage('Upload Gagal: Tidak bisa terhubung ke server.');
       } else {
-        setErrorMessage('Upload Gagal: '.concat(error.message));
+        setErrorMessage('Upload Gagal: Terjadi kesalahan jaringan.');
       }
       setUploadMessage('');
-      setPreviewData([]);
-    }
-  };
-  
-  // (BARU) Fungsi untuk menghapus file yang dipilih
-  const clearSelectedFile = () => {
-    setSelectedFile(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
+    } finally {
+        setIsUploading(false);
     }
   };
 
   return (
     <div className="content-section">
       <h2>Upload Laporan CSV</h2>
-      <p>Drag file CSV Anda ke kotak di bawah, atau klik untuk memilih file.</p>
+      <p>Anda dapat mengunggah banyak file sekaligus. Drag & drop file di sini.</p>
 
-      {/* (PERUBAHAN BESAR) - Tampilan Form dan Dropzone */}
       <form onSubmit={handleSubmit} style={styles.form}>
         
-        {/* Dropzone */}
+        {/* DROPZONE */}
         <div 
           style={{ ...styles.dropzone, ...(isDragging ? styles.dropzoneActive : {}) }}
           onClick={handleDropzoneClick}
@@ -122,87 +126,58 @@ function UploadCSV() {
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          {/* Input file asli kita sembunyikan */}
+          {/* Input file multiple */}
           <input 
             type="file" 
             accept=".csv"
-            onChange={(e) => handleFileSelect(e.target.files[0])} 
+            multiple // <-- Fitur Multiple diaktifkan
+            onChange={(e) => handleFileSelect(e.target.files)} 
             ref={fileInputRef} 
             style={{ display: 'none' }} 
           />
           
-          {/* Konten di dalam Dropzone */}
-          {selectedFile ? (
-            <div style={styles.fileInfo}>
-              <span style={styles.fileName}>File Siap: {selectedFile.name}</span>
-              <button 
-                type="button" 
-                onClick={(e) => {
-                  e.stopPropagation(); // Hentikan klik agar tidak trigger dropzone
-                  clearSelectedFile();
-                }} 
-                style={styles.clearButton}
-              >
-                Batal
-              </button>
-            </div>
-          ) : (
-            <p style={styles.dropzoneText}>
-              Drag & Drop file di sini, atau klik untuk memilih
-            </p>
-          )}
+          <p style={styles.dropzoneText}>
+            Klik atau Drag banyak file CSV ke sini
+          </p>
         </div>
+
+        {/* LIST FILE YANG DIPILIH */}
+        {selectedFiles.length > 0 && (
+            <div style={styles.fileListContainer}>
+                <h4 style={{marginTop: 0, marginBottom: '10px', color: '#333'}}>File yang akan diupload:</h4>
+                {selectedFiles.map((file, index) => (
+                    <div key={index} style={styles.fileItem}>
+                        <span style={styles.fileName}>📄 {file.name} ({(file.size / 1024).toFixed(1)} KB)</span>
+                        <button 
+                            type="button" 
+                            onClick={() => handleRemoveFile(index)} 
+                            style={styles.deleteButton}
+                            title="Hapus file ini"
+                        >
+                            ✕
+                        </button>
+                    </div>
+                ))}
+            </div>
+        )}
 
         <button 
           type="submit" 
-          style={{...styles.uploadButton, ...(!selectedFile ? styles.buttonDisabled : {})}} 
-          disabled={!selectedFile}
+          style={{...styles.uploadButton, ...((selectedFiles.length === 0 || isUploading) ? styles.buttonDisabled : {})}} 
+          disabled={selectedFiles.length === 0 || isUploading}
         >
-          Upload File
+          {isUploading ? 'Sedang Mengunggah...' : `Upload ${selectedFiles.length} File`}
         </button>
       </form>
-      {/* (AKHIR PERUBAHAN) */}
 
-
-      {/* Pesan Status (Tidak Berubah) */}
-      {uploadMessage && <p style={styles.successMessage}>{uploadMessage}</p>}
-      {errorMessage && <p style={styles.errorMessage}>{errorMessage}</p>}
-
-      {/* Tabel Preview (Tidak Berubah) */}
-      {previewData.length > 0 && (
-        <div style={styles.previewContainer}>
-          <h3 style={styles.previewTitle}>Data yang Baru Saja Di-upload</h3>
-          <div style={styles.tableWrapper}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  {Object.keys(previewData[0]).map(key => (
-                    <th key={key} style={styles.th}>{key}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {previewData.map((row, index) => (
-                  <tr key={index}>
-                    {Object.values(row).map((value, i) => (
-                      <td key={i} style={styles.td}>{value}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {uploadMessage && <div style={styles.successBox}>{uploadMessage}</div>}
+      {errorMessage && <div style={styles.errorBox}>{errorMessage}</div>}
     </div>
   );
 }
 
-// (PERUBAHAN) Objek Styles
 const styles = {
   form: { marginTop: '1.5rem', paddingBottom: '1.5rem', borderBottom: '1px solid #eee' },
-  
-  // Style baru untuk Dropzone
   dropzone: {
     border: '2px dashed #ccc',
     borderRadius: '8px',
@@ -210,67 +185,46 @@ const styles = {
     textAlign: 'center',
     cursor: 'pointer',
     backgroundColor: '#f9f9f9',
-    transition: 'background-color 0.2s, border-color 0.2s',
+    transition: 'all 0.2s',
     marginBottom: '1rem',
   },
-  dropzoneActive: {
-    backgroundColor: '#e6f7ff',
-    borderColor: '#1D5D50',
+  dropzoneActive: { backgroundColor: '#e6f7ff', borderColor: '#1D5D50' },
+  dropzoneText: { color: '#777', fontSize: '1rem' },
+  
+  // Style List File
+  fileListContainer: {
+      backgroundColor: 'white',
+      border: '1px solid #ddd',
+      borderRadius: '8px',
+      padding: '1rem',
+      marginBottom: '1rem',
+      maxHeight: '200px',
+      overflowY: 'auto'
   },
-  dropzoneText: {
-    color: '#777',
-    margin: 0,
-    fontSize: '1rem',
+  fileItem: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: '8px',
+      borderBottom: '1px solid #f0f0f0',
+      fontSize: '14px'
   },
-  fileInfo: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    fontSize: '1rem',
-    color: '#333',
-    fontWeight: '500',
-  },
-  fileName: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  clearButton: {
-    padding: '4px 8px',
-    backgroundColor: '#C0392B',
-    color: 'white',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '0.8rem',
-    marginLeft: '1rem',
-  },
-
-  // Style Tombol Upload yang diubah
-  uploadButton: { 
-    padding: '0.75rem 1.5rem', 
-    backgroundColor: '#1D5D50', 
-    color: 'white', 
-    border: 'none', 
-    borderRadius: '4px', 
-    cursor: 'pointer', 
-    fontSize: '1rem',
-    transition: 'background-color 0.2s',
-  },
-  buttonDisabled: {
-    backgroundColor: '#aaa',
-    cursor: 'not-allowed',
+  fileName: { color: '#555' },
+  deleteButton: {
+      background: 'none',
+      border: 'none',
+      color: '#C0392B',
+      fontWeight: 'bold',
+      cursor: 'pointer',
+      fontSize: '16px',
+      padding: '0 5px'
   },
 
-  // Style lama (tidak berubah)
-  successMessage: { marginTop: '1rem', color: 'green', fontWeight: 'bold' },
-  errorMessage: { marginTop: '1rem', color: 'red', fontWeight: 'bold' },
-  previewContainer: { marginTop: '2rem' },
-  previewTitle: { color: '#333' },
-  tableWrapper: { maxHeight: '300px', overflowY: 'auto', border: '1px solid #ddd' },
-  table: { width: '100%', borderCollapse: 'collapse' },
-  th: { padding: '8px 12px', borderBottom: '2px solid #1D5D50', backgroundColor: '#f9f9f9', textAlign: 'left', textTransform: 'capitalize' },
-  td: { padding: '8px 12px', borderBottom: '1px solid #eee' },
+  uploadButton: { padding: '0.75rem 1.5rem', backgroundColor: '#1D5D50', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '1rem', width: '100%' },
+  buttonDisabled: { backgroundColor: '#aaa', cursor: 'not-allowed' },
+  
+  successBox: { marginTop: '1rem', padding: '10px', backgroundColor: '#d4edda', color: '#155724', borderRadius: '5px' },
+  errorBox: { marginTop: '1rem', padding: '10px', backgroundColor: '#f8d7da', color: '#721c24', borderRadius: '5px' },
 };
 
 export default UploadCSV;
