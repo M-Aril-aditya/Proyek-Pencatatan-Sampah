@@ -14,7 +14,7 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#1D5D50",
-        "foregroundImage": "./assets/images/adaptive-icon.png", 
+        "foregroundImage": "./assets/images/adaptive-icon.png"
       },
       "package": "com.dexamedica.greenapp",
       "edgeToEdgeEnabled": true,
