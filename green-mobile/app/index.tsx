@@ -7,7 +7,7 @@ import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'reac
 // Kunci untuk menyimpan daftar user di storage
 export const USER_STORAGE_KEY = 'validUsersList'; 
 // Password master untuk admin
-const ADMIN_PASSWORD = 'admin123'; // Ganti dengan password master Anda
+const ADMIN_PASSWORD = '@dexagreen123'; // Ganti dengan password master Anda
 
 // Daftar user awal (hanya untuk migrasi pertama kali)
 const INITIAL_USERS = [
