@@ -1,12 +1,12 @@
 const { Pool } = require('pg');
 
-// Konfigurasi Database (Otomatis deteksi: Cloud atau Local)
+// Konfigurasi Database Lokal (Laptop)
 const pool = new Pool({
-  // Jika ada DATABASE_URL (dari Cloud), pakai itu. Jika tidak, pakai setting local.
-  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:admin@localhost:5432/green_db',
-  
-  // Pengaturan SSL (Wajib untuk Cloud Railway/Render)
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+  user: 'postgres',        // Username default pgAdmin
+  host: 'localhost',       // Server lokal
+  database: 'green_db',    // Nama database lokal Anda
+  password: '12345',       // Password pgAdmin laptop Anda
+  port: 5432,
 });
 
 module.exports = {
