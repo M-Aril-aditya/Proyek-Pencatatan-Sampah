@@ -48,10 +48,14 @@
     "extra": {
       "router": {},
       "extra": {
-  "eas": {
-    "projectId": "57533e54-2ef8-4f69-85b4-3fbfbba12d03"
-  }
-}
-    }
+        "eas": {
+          "projectId": "57533e54-2ef8-4f69-85b4-3fbfbba12d03"
+        }
+      },
+      "eas": {
+        "projectId": "57533e54-2ef8-4f69-85b4-3fbfbba12d03"
+      }
+    },
+    "owner": "aril26"
   }
 }
