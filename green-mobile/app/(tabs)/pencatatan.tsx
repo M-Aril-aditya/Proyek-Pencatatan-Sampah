@@ -3,20 +3,21 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import React, { useEffect, useState } from 'react';
-import { 
-  ActivityIndicator, 
-  Alert, 
-  Button, 
-  Keyboard, 
-  ScrollView, 
-  StyleSheet, 
-  Text, 
-  TextInput, 
-  View,
-  TouchableOpacity 
+import {
+  ActivityIndicator,
+  Alert,
+  Button,
+  Keyboard,
+  Platform,
+
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import RNPickerSelect from 'react-native-picker-select';
-
 // --- DEFINISI TIPE ---
 interface Field {
   id: string;
@@ -208,35 +209,64 @@ export default function PencatatanScreen() {
       const safeAreaName = areaName.replace(/\s+/g, '_');
       const filename = `green-${userName}-${safeAreaName}-${day}${month}${year}-${hours}${minutes}.csv`;
       
-      const fileUri = (FileSystem as any).documentDirectory + filename;
-      try {
-          await FileSystem.writeAsStringAsync(fileUri, csvString, { encoding: FileSystem.EncodingType.UTF8 });
-          await Sharing.shareAsync(fileUri);
-          
-          Alert.alert("Ekspor Berhasil", "Data telah diekspor. Hapus data yang sudah diinput dari HP?", [
-              { text: "Tidak" },
-              { text: "Ya, Hapus", onPress: async () => {
-                  const newData = { ...bobotSampah };
-                  dataToExport.forEach((row: ExportRow) => {
-                      delete newData[row.item_id];
-                  });
-                  setBobotSampah(newData);
-                  
-                  try {
-                      const allHistoryString = await AsyncStorage.getItem(HISTORY_STORAGE_KEY);
-                      const allHistory = allHistoryString ? JSON.parse(allHistoryString) : {};
-                      allHistory[userKey] = newData;
-                      await AsyncStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(allHistory));
-                  } catch (e: any) {
-                      console.error("Gagal update history setelah hapus: ", e);
-                  }
-              }}
-          ]);
+      // --- 2. LOGIKA BARU (CABANG WEB VS MOBILE) ---
+      
+      if (Platform.OS === 'web') {
+        // === JIKA DI WEB (BROWSER / PWA) ===
+        // Kita gunakan fitur download bawaan browser
+        try {
+            const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            
+            // Buat elemen <a> palsu untuk trigger download
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = filename;
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } catch (e) {
+            console.error("Gagal download di web:", e);
+            Alert.alert("Error", "Gagal mengunduh file di browser.");
+            return;
+        }
 
-      } catch (error: any) {
-          console.error('Error saat ekspor:', error);
-          Alert.alert('Error', 'Gagal membuat atau membagikan file CSV.');
+      } else {
+        // === JIKA DI MOBILE (ANDROID APK) ===
+        // Tetap gunakan FileSystem seperti kode lama Anda
+        const fileUri = (FileSystem as any).documentDirectory + filename;
+        try {
+            await FileSystem.writeAsStringAsync(fileUri, csvString, { encoding: FileSystem.EncodingType.UTF8 });
+            await Sharing.shareAsync(fileUri);
+        } catch (error: any) {
+            console.error('Error saat ekspor mobile:', error);
+            Alert.alert('Error', 'Gagal membuat atau membagikan file CSV.');
+            return; // Stop jika gagal
+        }
       }
+
+      // --- 3. KONFIRMASI HAPUS DATA (BERLAKU UNTUK KEDUANYA) ---
+      // Kode ini tetap jalan baik di Web maupun Mobile setelah file terunduh
+      Alert.alert("Ekspor Berhasil", "Data telah diekspor. Hapus data yang sudah diinput dari HP?", [
+          { text: "Tidak" },
+          { text: "Ya, Hapus", onPress: async () => {
+              const newData = { ...bobotSampah };
+              dataToExport.forEach((row: ExportRow) => {
+                  delete newData[row.item_id];
+              });
+              setBobotSampah(newData);
+              
+              try {
+                  const allHistoryString = await AsyncStorage.getItem(HISTORY_STORAGE_KEY);
+                  const allHistory = allHistoryString ? JSON.parse(allHistoryString) : {};
+                  allHistory[userKey] = newData;
+                  await AsyncStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(allHistory));
+              } catch (e: any) {
+                  console.error("Gagal update history setelah hapus: ", e);
+              }
+          }}
+      ]);
   };
 
   const renderDynamicForm = () => {
