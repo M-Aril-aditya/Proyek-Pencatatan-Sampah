@@ -8,6 +8,9 @@
     "scheme": "greendexa",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "assetBundlePatterns": [
+    "**/*"
+  ],
     "ios": {
       "supportsTablet": true
     },
@@ -57,4 +60,5 @@
     },
     "owner": "aril26"
   }
+  
 }
