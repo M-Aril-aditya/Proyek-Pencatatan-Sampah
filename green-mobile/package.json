@@ -50,10 +50,7 @@
     "typescript": "~5.9.2"
   },
 
-  "scripts": {
-  "web:build": "expo export --platform web"
-},
-
+  
   "private": true
   
   
