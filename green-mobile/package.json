@@ -8,8 +8,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint",
-    "web:build": "expo export --platform web"
+    "lint": "expo lint"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
@@ -18,7 +17,6 @@
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
-    "expo": "~54.0.25",
     "expo-constants": "~18.0.9",
     "expo-file-system": "~19.0.17",
     "expo-font": "~14.0.9",
@@ -48,11 +46,8 @@
     "@types/react-native": "^0.72.8",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
+    "expo": "^54.0.25",
     "typescript": "~5.9.2"
   },
-
-  
   "private": true
-  
-  
 }

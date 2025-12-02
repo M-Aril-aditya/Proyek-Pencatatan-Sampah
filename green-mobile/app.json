@@ -7,10 +7,9 @@
     "icon": "./assets/images/icon.png",
     "scheme": "greendexa",
     "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": 
+      "**/*",
     "newArchEnabled": true,
-    "assetBundlePatterns": [
-    "**/*"
-  ],
     "ios": {
       "supportsTablet": true
     },
