@@ -85,7 +85,7 @@ function UploadCSV() {
         return;
       }
       
-      const response = await axios.post('http://localhost:5000/api/upload', formData, {
+      const response = await axios.post('proyek-pencatatan-sampah.vercel.app/api/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
           'Authorization': `Bearer ${token}`

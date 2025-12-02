@@ -20,7 +20,7 @@ function StatsContent() {
        try {
         const token = localStorage.getItem('adminToken');
         if (!token) { navigate('/'); return; } // Arahkan ke login jika token tidak ada
-        const response = await axios.get(`http://localhost:5000/api/stats?range=${selectedRange}`, {
+        const response = await axios.get(`proyek-pencatatan-sampah.vercel.app/api/stats?range=${selectedRange}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         setStatsData(response.data);

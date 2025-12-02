@@ -66,8 +66,8 @@ function StatsMingguan() {
       const headers = { 'Authorization': `Bearer ${token}` };
       
       try {
-        const statsRequest = axios.get('http://localhost:5000/api/stats', { params, headers });
-        const recordsRequest = axios.get('http://localhost:5000/api/records', { params, headers });
+        const statsRequest = axios.get('proyek-pencatatan-sampah.vercel.app/api/stats', { params, headers });
+        const recordsRequest = axios.get('proyek-pencatatan-sampah.vercel.app/api/records', { params, headers });
 
         const [statsResponse, recordsResponse] = await Promise.all([
           statsRequest,
