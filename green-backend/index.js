@@ -135,9 +135,13 @@ app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
 });
 
 // --- HELPER TANGGAL (Asia/Jakarta) ---
+// --- HELPER TANGGAL (FIX TIMEZONE ASIA/JAKARTA) ---
 function getSQLDateCondition(range, year, month, week) {
   const jsDate = new Date(); 
+  
+  // KUNCI PERBAIKAN: Pakai timezone 'Asia/Jakarta' secara eksplisit di Query
   const local_timestamp = "recorded_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta'";
+  
   const targetYear = year ? parseInt(year) : jsDate.getFullYear();
   const targetMonth = month ? parseInt(month) : jsDate.getMonth() + 1; 
   
@@ -148,12 +152,11 @@ function getSQLDateCondition(range, year, month, week) {
   else if (dayOfMonth >= 22) currentWeekOfMonth = 4;
   const targetWeek = week ? parseInt(week) : currentWeekOfMonth;
 
-  const formatDate = (d) => {
-    const m = (d.getMonth() + 1).toString().padStart(2, '0');
-    const dy = d.getDate().toString().padStart(2, '0');
-    return `${d.getFullYear()}-${m}-${dy}`;
-  };
-  
+  // Format Hari Ini (YYYY-MM-DD)
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }); // Format: 2025-11-10
+
+  let dateCondition = '';
+
   switch (range) {
     case 'weekly':
       let startDateW, endDateW;
@@ -162,19 +165,24 @@ function getSQLDateCondition(range, year, month, week) {
       else if (targetWeek === 3) { startDateW = `'${targetYear}-${targetMonth}-15'`; endDateW = `'${targetYear}-${targetMonth}-21'`; }
       else { 
         startDateW = `'${targetYear}-${targetMonth}-22'`;
-        const endDateW = `(DATE_TRUNC('MONTH', ${startDateW}::DATE) + INTERVAL '1 MONTH' - INTERVAL '1 DAY')::DATE`;
-        dateCondition = `DATE(${local_timestamp}) BETWEEN ${startDateW} AND ${endDateW}`;
+        const endDateW_SQL = `(DATE_TRUNC('MONTH',TO_DATE('${targetYear}-${targetMonth}-01','YYYY-MM-DD')) + INTERVAL '1 MONTH' - INTERVAL '1 DAY')::DATE`;
+        dateCondition = `DATE(${local_timestamp}) >= '${startDateW}' AND DATE(${local_timestamp}) <= ${endDateW_SQL}`;
+        break; // Break khusus untuk week 4
       }
-      if (targetWeek <= 3) dateCondition = `DATE(${local_timestamp}) BETWEEN ${startDateW} AND ${endDateW}`;
+      // Untuk week 1-3
+      dateCondition = `DATE(${local_timestamp}) BETWEEN '${startDateW}' AND '${endDateW}'`;
       break;
+
     case 'monthly':
       dateCondition = `EXTRACT(MONTH FROM ${local_timestamp}) = ${targetMonth} AND EXTRACT(YEAR FROM ${local_timestamp}) = ${targetYear}`;
       break;
+
     case 'yearly':
       dateCondition = `EXTRACT(YEAR FROM ${local_timestamp}) = ${targetYear}`;
       break;
-    default: // daily
-      const today = formatDate(jsDate); 
+
+    default: // 'daily'
+      // Mengambil data hari ini sesuai jam Jakarta
       dateCondition = `DATE(${local_timestamp}) = '${today}'`;
   }
   return dateCondition;
