@@ -27,9 +27,9 @@ function StatsHarian() {
       
       try {
         // Panggil /api/stats UNTUK PIE CHART
-        const statsRequest = axios.get('proyek-pencatatan-sampah.vercel.app/api/stats', { params, headers });
+        const statsRequest = axios.get('https://proyek-pencatatan-sampah.vercel.app/api/stats', { params, headers });
         // Panggil /api/records UNTUK TABEL
-        const recordsRequest = axios.get('proyek-pencatatan-sampah.vercel.app/api/records', { params, headers });
+        const recordsRequest = axios.get('https://proyek-pencatatan-sampah.vercel.app/api/records', { params, headers });
 
         const [statsResponse, recordsResponse] = await Promise.all([
           statsRequest,

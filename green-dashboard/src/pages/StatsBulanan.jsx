@@ -51,8 +51,8 @@ function StatsBulanan() {
       const headers = { 'Authorization': `Bearer ${token}` };
       
       try {
-        const statsRequest = axios.get('proyek-pencatatan-sampah.vercel.app/api/stats', { params, headers });
-        const recordsRequest = axios.get('proyek-pencatatan-sampah.vercel.app/api/records', { params, headers });
+        const statsRequest = axios.get('https://proyek-pencatatan-sampah.vercel.app/api/stats', { params, headers });
+        const recordsRequest = axios.get('https://proyek-pencatatan-sampah.vercel.app/api/records', { params, headers });
 
         const [statsResponse, recordsResponse] = await Promise.all([
           statsRequest,
@@ -346,7 +346,7 @@ function StatsBulanan() {
     const token = localStorage.getItem('adminToken');
 
     try {
-      const response = await axios.get('proyek-pencatatan-sampah.vercel.app/api/export/monthly', {
+      const response = await axios.get('https://proyek-pencatatan-sampah.vercel.app/api/export/monthly', {
         headers: { 'Authorization': `Bearer ${token}` },
         params: { month: selectedMonth, year: selectedYear },
         responseType: 'blob', 

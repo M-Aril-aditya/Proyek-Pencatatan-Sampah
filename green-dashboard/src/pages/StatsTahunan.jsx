@@ -41,8 +41,8 @@ function StatsTahunan() {
       const headers = { 'Authorization': `Bearer ${token}` };
       
       try {
-        const statsRequest = axios.get('proyek-pencatatan-sampah.vercel.app/api/stats', { params, headers });
-        const recordsRequest = axios.get('proyek-pencatatan-sampah.vercel.app/api/records', { params, headers });
+        const statsRequest = axios.get('https://proyek-pencatatan-sampah.vercel.app/api/stats', { params, headers });
+        const recordsRequest = axios.get('https://proyek-pencatatan-sampah.vercel.app/api/records', { params, headers });
 
         const [statsResponse, recordsResponse] = await Promise.all([
           statsRequest,
@@ -247,7 +247,7 @@ function StatsTahunan() {
     const token = localStorage.getItem('adminToken');
 
     try {
-      const response = await axios.get('proyek-pencatatan-sampah.vercel.app/api/export/yearly', {
+      const response = await axios.get('https://proyek-pencatatan-sampah.vercel.app/api/export/yearly', {
         headers: { 'Authorization': `Bearer ${token}` },
         params: { year: selectedYear },
         responseType: 'blob', 

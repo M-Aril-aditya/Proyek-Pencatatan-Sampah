@@ -16,7 +16,7 @@ function Login() {
 
     try {
       // Ganti URL ini sesuai backend Anda jika sudah deploy, atau biarkan localhost
-      const response = await axios.post('proyek-pencatatan-sampah.vercel.app/api/login', {
+      const response = await axios.post('https://proyek-pencatatan-sampah.vercel.app/api/login', {
         username,
         password
       });
