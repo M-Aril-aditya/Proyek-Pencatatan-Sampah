@@ -136,12 +136,16 @@ app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
 
 // --- HELPER TANGGAL (Asia/Jakarta) ---
 // --- HELPER TANGGAL (FIX TIMEZONE ASIA/JAKARTA) ---
-// --- HELPER TANGGAL (UPDATE: Support Filter Tanggal Spesifik) ---
 function getSQLDateCondition(range, year, month, week, specificDate) {
   const jsDate = new Date(); 
+  
   const local_timestamp = "recorded_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta'";
+  
   const targetYear = year ? parseInt(year) : jsDate.getFullYear();
   const targetMonth = month ? parseInt(month) : jsDate.getMonth() + 1; 
+  
+  // Pastikan bulan selalu 2 digit (01, 02, ... 11, 12)
+  const tm = targetMonth.toString().padStart(2, '0');
   
   const dayOfMonth = jsDate.getDate();
   let currentWeekOfMonth = 1;
@@ -150,24 +154,26 @@ function getSQLDateCondition(range, year, month, week, specificDate) {
   else if (dayOfMonth >= 22) currentWeekOfMonth = 4;
   const targetWeek = week ? parseInt(week) : currentWeekOfMonth;
 
-  // Format Hari Ini (YYYY-MM-DD)
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
 
   let dateCondition = '';
 
   switch (range) {
     case 'weekly':
-      let startDateW, endDateW;
-      if (targetWeek === 1) { startDateW = `'${targetYear}-${targetMonth}-01'`; endDateW = `'${targetYear}-${targetMonth}-07'`; }
-      else if (targetWeek === 2) { startDateW = `'${targetYear}-${targetMonth}-08'`; endDateW = `'${targetYear}-${targetMonth}-14'`; }
-      else if (targetWeek === 3) { startDateW = `'${targetYear}-${targetMonth}-15'`; endDateW = `'${targetYear}-${targetMonth}-21'`; }
+      // Hapus tanda kutip di dalam variabel agar tidak double saat masuk query
+      let s, e;
+      if (targetWeek === 1) { s = `${targetYear}-${tm}-01`; e = `${targetYear}-${tm}-07`; }
+      else if (targetWeek === 2) { s = `${targetYear}-${tm}-08`; e = `${targetYear}-${tm}-14`; }
+      else if (targetWeek === 3) { s = `${targetYear}-${tm}-15`; e = `${targetYear}-${tm}-21`; }
       else { 
-        startDateW = `'${targetYear}-${targetMonth}-22'`;
-        const endDateW_SQL = `(DATE_TRUNC('MONTH',TO_DATE('${targetYear}-${targetMonth}-01','YYYY-MM-DD')) + INTERVAL '1 MONTH' - INTERVAL '1 DAY')::DATE`;
-        dateCondition = `DATE(${local_timestamp}) >= '${startDateW}' AND DATE(${local_timestamp}) <= ${endDateW_SQL}`;
+        // Week 4 (Tgl 22 s/d Akhir Bulan)
+        s = `${targetYear}-${tm}-22`;
+        const endOfMonth = `(DATE_TRUNC('MONTH',TO_DATE('${targetYear}-${tm}-01','YYYY-MM-DD')) + INTERVAL '1 MONTH' - INTERVAL '1 DAY')::DATE`;
+        dateCondition = `DATE(${local_timestamp}) >= '${s}' AND DATE(${local_timestamp}) <= ${endOfMonth}`;
         break; 
       }
-      dateCondition = `DATE(${local_timestamp}) BETWEEN '${startDateW}' AND '${endDateW}'`;
+      // Week 1-3
+      dateCondition = `DATE(${local_timestamp}) BETWEEN '${s}' AND '${e}'`;
       break;
 
     case 'monthly':
@@ -179,7 +185,6 @@ function getSQLDateCondition(range, year, month, week, specificDate) {
       break;
 
     default: // 'daily'
-      // JIKA ADA TANGGAL SPESIFIK DIPILIH, PAKAI ITU. JIKA TIDAK, PAKAI HARI INI.
       if (specificDate) {
           dateCondition = `DATE(${local_timestamp}) = '${specificDate}'`;
       } else {
@@ -189,11 +194,11 @@ function getSQLDateCondition(range, year, month, week, specificDate) {
   return dateCondition;
 }
 
-// --- UPDATE ROUTE STATISTIK (Terima param 'date') ---
+// --- STATISTIK (3 KATEGORI) ---
 app.get('/api/stats', async (req, res) => {
-  const { range, year, month, week, date } = req.query; // Tambah 'date'
+  const { range, year, month, week } = req.query;
   try {
-    const dateCondition = getSQLDateCondition(range, year, month, week, date);
+    const dateCondition = getSQLDateCondition(range, year, month, week);
     const query = `
       SELECT 
         COALESCE(SUM(CASE WHEN status = 'Organik Terpilah' THEN weight_kg ELSE 0 END), 0) as total_organik,
@@ -208,21 +213,25 @@ app.get('/api/stats', async (req, res) => {
       { name: 'Anorganik', value: parseFloat(data.total_anorganik) },
       { name: 'Tidak Terkelola', value: parseFloat(data.total_residu) }
     ]);
-  } catch (err) { res.status(500).json({ message: 'Error stats' }); }
+  } catch (err) {
+    res.status(500).json({ message: 'Server error statistics.' });
+  }
 });
 
-// --- UPDATE ROUTE RECORDS (Terima param 'date') ---
+// --- RECORDS ---
 app.get('/api/records', async (req, res) => {
-  const { range, year, month, week, date } = req.query; // Tambah 'date'
+  const { range, year, month, week } = req.query;
   try {
-    const dateCondition = getSQLDateCondition(range, year, month, week, date);
+    const dateCondition = getSQLDateCondition(range, year, month, week);
     const query = `
       SELECT area_label, item_label, pengelola, status, weight_kg, petugas_name, recorded_at
       FROM waste_records WHERE ${dateCondition} ORDER BY recorded_at DESC;
     `;
     const recordsQuery = await pool.query(query);
     res.json(recordsQuery.rows);
-  } catch (err) { res.status(500).json({ message: 'Error records' }); }
+  } catch (err) {
+    res.status(500).json({ message: 'Server error records.' });
+  }
 });
 
 // --- HAPUS DATA ---
