@@ -55,8 +55,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// --- UPLOAD (VERCEL MODE: MEMORY + BOM FIX) ---
-// 2. UPLOAD (VERCEL MODE + REALTIME UPLOAD DATE)
+// --- UPLOAD (VERCEL MODE + REALTIME TIMESTAMP) ---
 app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
   if (!req.files || req.files.length === 0) return res.status(400).json({ message: 'Tidak ada file.' });
 
@@ -65,23 +64,26 @@ app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
   const processFile = (file) => {
     return new Promise((resolve, reject) => {
       const rowData = [];
+      
+      // Baca dari BUFFER (RAM)
       Readable.from(file.buffer)
-        .pipe(csv({ mapHeaders: ({ header }) => header.trim().replace(/^\uFEFF/, '') }))
+        .pipe(csv({
+            mapHeaders: ({ header }) => header.trim().replace(/^\uFEFF/, '') // Fix BOM (karakter hantu)
+        }))
         .on('data', (data) => rowData.push(data))
         .on('error', (err) => reject(err))
         .on('end', async () => {
             if (rowData.length === 0) return resolve({ status: 'error', file: file.originalname, reason: 'File kosong' });
             
+            // Gunakan pool.connect untuk transaksi
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
                 for (const row of rowData) {
                     
-                    // --- PERBAIKAN WAKTU DI SINI ---
-                    // Kita abaikan kolom 'Waktu Catat' dari CSV karena sering error format.
-                    // Kita gunakan WAKTU SERVER SAAT INI (Real-time Upload).
+                    // --- PERBAIKAN WAKTU: GUNAKAN WAKTU SERVER SAAT INI ---
                     let recordedAt = new Date(); 
-                    // -------------------------------
+                    // ------------------------------------------------------
 
                     const queryText = `
                         INSERT INTO waste_records 
@@ -112,21 +114,19 @@ app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
     await Promise.all(promises);
     res.json({ message: 'Upload berhasil. Data disimpan sesuai waktu upload.' });
   } catch (err) {
-    res.status(500).json({ message: 'Server Error' });
+    console.error('System Error:', err);
+    res.status(500).json({ message: 'Terjadi kesalahan sistem.' });
   }
 });
 
 // --- HELPER TANGGAL (Asia/Jakarta) ---
-// --- HELPER TANGGAL (FIX TIMEZONE ASIA/JAKARTA) ---
 function getSQLDateCondition(range, year, month, week, specificDate) {
   const jsDate = new Date(); 
-  
   const local_timestamp = "recorded_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta'";
-  
   const targetYear = year ? parseInt(year) : jsDate.getFullYear();
   const targetMonth = month ? parseInt(month) : jsDate.getMonth() + 1; 
   
-  // Pastikan bulan selalu 2 digit (01, 02, ... 11, 12)
+  // Pastikan bulan 2 digit
   const tm = targetMonth.toString().padStart(2, '0');
   
   const dayOfMonth = jsDate.getDate();
@@ -136,36 +136,31 @@ function getSQLDateCondition(range, year, month, week, specificDate) {
   else if (dayOfMonth >= 22) currentWeekOfMonth = 4;
   const targetWeek = week ? parseInt(week) : currentWeekOfMonth;
 
+  // Format Hari Ini (YYYY-MM-DD)
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
 
   let dateCondition = '';
 
   switch (range) {
     case 'weekly':
-      // Hapus tanda kutip di dalam variabel agar tidak double saat masuk query
       let s, e;
       if (targetWeek === 1) { s = `${targetYear}-${tm}-01`; e = `${targetYear}-${tm}-07`; }
       else if (targetWeek === 2) { s = `${targetYear}-${tm}-08`; e = `${targetYear}-${tm}-14`; }
       else if (targetWeek === 3) { s = `${targetYear}-${tm}-15`; e = `${targetYear}-${tm}-21`; }
       else { 
-        // Week 4 (Tgl 22 s/d Akhir Bulan)
         s = `${targetYear}-${tm}-22`;
         const endOfMonth = `(DATE_TRUNC('MONTH',TO_DATE('${targetYear}-${tm}-01','YYYY-MM-DD')) + INTERVAL '1 MONTH' - INTERVAL '1 DAY')::DATE`;
         dateCondition = `DATE(${local_timestamp}) >= '${s}' AND DATE(${local_timestamp}) <= ${endOfMonth}`;
         break; 
       }
-      // Week 1-3
       dateCondition = `DATE(${local_timestamp}) BETWEEN '${s}' AND '${e}'`;
       break;
-
     case 'monthly':
       dateCondition = `EXTRACT(MONTH FROM ${local_timestamp}) = ${targetMonth} AND EXTRACT(YEAR FROM ${local_timestamp}) = ${targetYear}`;
       break;
-
     case 'yearly':
       dateCondition = `EXTRACT(YEAR FROM ${local_timestamp}) = ${targetYear}`;
       break;
-
     default: // 'daily'
       if (specificDate) {
           dateCondition = `DATE(${local_timestamp}) = '${specificDate}'`;
@@ -178,9 +173,9 @@ function getSQLDateCondition(range, year, month, week, specificDate) {
 
 // --- STATISTIK (3 KATEGORI) ---
 app.get('/api/stats', async (req, res) => {
-  const { range, year, month, week } = req.query;
+  const { range, year, month, week, date } = req.query;
   try {
-    const dateCondition = getSQLDateCondition(range, year, month, week);
+    const dateCondition = getSQLDateCondition(range, year, month, week, date);
     const query = `
       SELECT 
         COALESCE(SUM(CASE WHEN status = 'Organik Terpilah' THEN weight_kg ELSE 0 END), 0) as total_organik,
@@ -202,9 +197,9 @@ app.get('/api/stats', async (req, res) => {
 
 // --- RECORDS ---
 app.get('/api/records', async (req, res) => {
-  const { range, year, month, week } = req.query;
+  const { range, year, month, week, date } = req.query;
   try {
-    const dateCondition = getSQLDateCondition(range, year, month, week);
+    const dateCondition = getSQLDateCondition(range, year, month, week, date);
     const query = `
       SELECT area_label, item_label, pengelola, status, weight_kg, petugas_name, recorded_at
       FROM waste_records WHERE ${dateCondition} ORDER BY recorded_at DESC;
@@ -272,13 +267,12 @@ app.get('/api/export/monthly', async (req, res) => {
         const workbook = new excel.Workbook();
         const worksheet = workbook.addWorksheet(`Laporan ${targetMonth}-${targetYear}`);
 
-        // Set Lebar Kolom Manual
-        for (let i = 3; i <= 19; i++) { worksheet.getColumn(i).width = 15; }
-        worksheet.getColumn(1).width = 5; 
-        worksheet.getColumn(2).width = 30;
+        // --- HEADER & MERGE ---
+        worksheet.mergeCells('A1:R1');
+        worksheet.getCell('A1').value = `REKAMAN TIMBULAN SAMPAH - BULAN ${targetMonth}/${targetYear}`;
+        worksheet.getCell('A1').font = { bold: true, size: 14 };
+        worksheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
 
-        // Header
-        worksheet.mergeCells('A1:R1'); worksheet.getCell('A1').value = `REKAMAN TIMBULAN SAMPAH - BULAN ${targetMonth}/${targetYear}`;
         worksheet.mergeCells('A3:A5'); worksheet.getCell('A3').value = 'No';
         worksheet.mergeCells('B3:B5'); worksheet.getCell('B3').value = 'Tanggal';
 
@@ -300,89 +294,116 @@ app.get('/api/export/monthly', async (req, res) => {
 
         worksheet.mergeCells('S3:S5'); worksheet.getCell('S3').value = 'TOTAL HARIAN (Kg)';
 
-        // Styling Header
-        ['A3','B3','C3','G3','K3','O3','S3'].forEach(c => {
-             const cell = worksheet.getCell(c);
-             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
-             cell.font = { bold: true };
-             cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        ['A3', 'B3', 'C3', 'G3', 'K3', 'O3', 'S3'].forEach(cell => {
+            worksheet.getCell(cell).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+            worksheet.getCell(cell).font = { bold: true };
+            worksheet.getCell(cell).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
         });
-        // Styling Subheader
-        for (let r = 4; r <= 5; r++) { worksheet.getRow(r).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }; }
 
-        // Isi Data
+        // --- PENGATURAN LEBAR KOLOM (FIXED) ---
+        worksheet.getColumn(1).width = 5; 
+        worksheet.getColumn(2).width = 30; 
+        for(let i=3; i<=19; i++) {
+            worksheet.getColumn(i).width = 15;
+        }
+
+        for (let r = 4; r <= 5; r++) {
+             worksheet.getRow(r).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        }
+
+        // Isi Data Harian
         for (let d = 1; d <= daysInMonth; d++) {
-            const r = reportData[d];
-            const kt = r['Area Kantor'].organik + r['Area Kantor'].anorganik + r['Area Kantor'].residu;
-            const pt = r['Area Parkir'].organik + r['Area Parkir'].anorganik + r['Area Parkir'].residu;
-            const mt = r['Area Makan'].organik + r['Area Makan'].anorganik + r['Area Makan'].residu;
-            const tt = r['Area Ruang Tunggu'].organik + r['Area Ruang Tunggu'].anorganik + r['Area Ruang Tunggu'].residu;
-            const dt = kt + pt + mt + tt;
+            const rowData = reportData[d];
+            const rowNum = d + 5; 
 
-            const row = worksheet.getRow(d + 5);
-            row.values = [ d, d, 
-                r['Area Kantor'].organik, r['Area Kantor'].anorganik, r['Area Kantor'].residu, kt,
-                r['Area Parkir'].organik, r['Area Parkir'].anorganik, r['Area Parkir'].residu, pt,
-                r['Area Makan'].organik, r['Area Makan'].anorganik, r['Area Makan'].residu, mt,
-                r['Area Ruang Tunggu'].organik, r['Area Ruang Tunggu'].anorganik, r['Area Ruang Tunggu'].residu, tt,
-                dt 
+            const k_org = rowData['Area Kantor'].organik; const k_ano = rowData['Area Kantor'].anorganik; const k_res = rowData['Area Kantor'].residu;
+            const k_tot = k_org + k_ano + k_res;
+
+            const p_org = rowData['Area Parkir'].organik; const p_ano = rowData['Area Parkir'].anorganik; const p_res = rowData['Area Parkir'].residu;
+            const p_tot = p_org + p_ano + p_res;
+
+            const m_org = rowData['Area Makan'].organik; const m_ano = rowData['Area Makan'].anorganik; const m_res = rowData['Area Makan'].residu;
+            const m_tot = m_org + m_ano + m_res;
+
+            const t_org = rowData['Area Ruang Tunggu'].organik; const t_ano = rowData['Area Ruang Tunggu'].anorganik; const t_res = rowData['Area Ruang Tunggu'].residu;
+            const t_tot = t_org + t_ano + t_res;
+
+            const dailyTotal = k_tot + p_tot + m_tot + t_tot;
+
+            const row = worksheet.getRow(rowNum);
+            row.values = [
+                d, d,
+                k_org, k_ano, k_res, k_tot,
+                p_org, p_ano, p_res, p_tot,
+                m_org, m_ano, m_res, m_tot,
+                t_org, t_ano, t_res, t_tot,
+                dailyTotal
             ];
         }
 
-        // Footer
+        // --- FOOTER (Total Kg, Ton, Rata-rata) ---
         const rowTotalKg = daysInMonth + 6; 
         worksheet.getCell(`A${rowTotalKg}`).value = 'Total/jenis (kg/bulan)';
         worksheet.mergeCells(`A${rowTotalKg}:B${rowTotalKg}`);
-        
+        worksheet.getCell(`A${rowTotalKg}`).font = { bold: true };
+        worksheet.getCell(`A${rowTotalKg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } }; 
+
+        for(let col=3; col<=19; col++) {
+            const colLetter = worksheet.getColumn(col).letter;
+            worksheet.getCell(`${colLetter}${rowTotalKg}`).value = { formula: `SUM(${colLetter}6:${colLetter}${rowTotalKg-1})` };
+            worksheet.getCell(`${colLetter}${rowTotalKg}`).font = { bold: true };
+            worksheet.getCell(`${colLetter}${rowTotalKg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
+        }
+
         const rowTotalTon = rowTotalKg + 1; 
         worksheet.getCell(`A${rowTotalTon}`).value = 'Total/jenis (ton/bulan)';
         worksheet.mergeCells(`A${rowTotalTon}:B${rowTotalTon}`);
-        
+        worksheet.getCell(`A${rowTotalTon}`).font = { bold: true };
+        worksheet.getCell(`A${rowTotalTon}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFCCBC' } }; 
+
+        for(let col=3; col<=19; col++) {
+            const colLetter = worksheet.getColumn(col).letter;
+            worksheet.getCell(`${colLetter}${rowTotalTon}`).value = { formula: `${colLetter}${rowTotalKg}/1000` };
+            worksheet.getCell(`${colLetter}${rowTotalTon}`).numFmt = '0.000';
+            worksheet.getCell(`${colLetter}${rowTotalTon}`).font = { bold: true };
+            worksheet.getCell(`${colLetter}${rowTotalTon}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFCCBC' } };
+        }
+
         const rowAvg = rowTotalTon + 1; 
         worksheet.getCell(`A${rowAvg}`).value = 'Rata-rata perhari (kg/hari)';
         worksheet.mergeCells(`A${rowAvg}:B${rowAvg}`);
+        worksheet.getCell(`A${rowAvg}`).font = { bold: true };
+        worksheet.getCell(`A${rowAvg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } }; 
 
         for(let col=3; col<=19; col++) {
-            const l = worksheet.getColumn(col).letter;
-            worksheet.getCell(`${l}${rowTotalKg}`).value = { formula: `SUM(${l}6:${l}${rowTotalKg-1})` };
-            worksheet.getCell(`${l}${rowTotalTon}`).value = { formula: `${l}${rowTotalKg}/1000` };
-            worksheet.getCell(`${l}${rowTotalTon}`).numFmt = '0.000';
-            worksheet.getCell(`${l}${rowAvg}`).value = { formula: `${l}${rowTotalKg}/${daysInMonth}` };
-            worksheet.getCell(`${l}${rowAvg}`).numFmt = '0.00';
+            const colLetter = worksheet.getColumn(col).letter;
+            worksheet.getCell(`${colLetter}${rowAvg}`).value = { formula: `${colLetter}${rowTotalKg}/${daysInMonth}` };
+            worksheet.getCell(`${colLetter}${rowAvg}`).numFmt = '0.00'; 
+            worksheet.getCell(`${colLetter}${rowAvg}`).font = { bold: true };
+            worksheet.getCell(`${colLetter}${rowAvg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
         }
-        
-        // Styling Footer
-        [rowTotalKg, rowTotalTon, rowAvg].forEach(r => {
-            const cellA = worksheet.getCell(`A${r}`);
-            cellA.font = { bold: true };
-            cellA.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
-            for(let c=3; c<=19; c++) {
-                const cell = worksheet.getCell(`${worksheet.getColumn(c).letter}${r}`);
-                cell.font = { bold: true };
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: (r === rowTotalTon ? 'FFFFCCBC' : 'FFFFE0B2') } };
-            }
-        });
 
-        // Borders
-        worksheet.eachRow((row) => {
+        // Border
+        worksheet.eachRow((row, rowNumber) => {
             row.eachCell((cell) => {
-                cell.border = { top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'} };
-                cell.alignment = { horizontal: 'center', vertical: 'middle' };
+                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+                cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
             });
         });
 
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename=Laporan_Bulanan.xlsx`);
+        res.setHeader('Content-Disposition', `attachment; filename=Laporan_Lengkap_${targetMonth}-${targetYear}.xlsx`);
+
         await workbook.xlsx.write(res);
         res.end();
 
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: 'Error export.' });
+        console.error('Error saat ekspor Excel:', err.message);
+        res.status(500).json({ message: 'Gagal membuat file Excel.' });
     }
 });
 
-// --- EKSPOR TAHUNAN (MATRIKS BULANAN) ---
+// --- RUTE EKSPOR TAHUNAN (FIX WIDTH & TOTAL) ---
 app.get('/api/export/yearly', async (req, res) => {
     const targetYear = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
 
@@ -395,7 +416,10 @@ app.get('/api/export/yearly', async (req, res) => {
         );
 
         const reportData = {};
-        const monthNames = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+        const monthNames = [
+            'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 
+            'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+        ];
 
         for (let m = 0; m < 12; m++) {
             reportData[m] = {
@@ -408,7 +432,8 @@ app.get('/api/export/yearly', async (req, res) => {
 
         rows.forEach(row => {
             const dateObj = new Date(row.recorded_at);
-            const m = dateObj.getMonth();
+            const monthIndex = dateObj.getMonth(); 
+            
             let area = row.area_label ? row.area_label.trim() : '';
             const status = row.status ? row.status.trim() : '';
             const weight = parseFloat(row.weight_kg) || 0;
@@ -420,29 +445,31 @@ app.get('/api/export/yearly', async (req, res) => {
             else if (area.toLowerCase().includes('tunggu')) targetAreaKey = 'Area Ruang Tunggu';
 
             if (targetAreaKey) {
-                if (status === 'Organik Terpilah') reportData[m][targetAreaKey].organik += weight;
-                else if (status === 'Anorganik Terpilah') reportData[m][targetAreaKey].anorganik += weight;
-                else if (status === 'Tidak Terkelola') reportData[m][targetAreaKey].residu += weight;
+                if (status === 'Organik Terpilah') reportData[monthIndex][targetAreaKey].organik += weight;
+                else if (status === 'Anorganik Terpilah') reportData[monthIndex][targetAreaKey].anorganik += weight;
+                else if (status === 'Tidak Terkelola') reportData[monthIndex][targetAreaKey].residu += weight;
             }
         });
 
         const workbook = new excel.Workbook();
         const worksheet = workbook.addWorksheet(`Laporan Tahun ${targetYear}`);
 
-        // Columns Width
-        for (let i = 3; i <= 19; i++) { worksheet.getColumn(i).width = 15; }
-        worksheet.getColumn(1).width = 5; 
-        worksheet.getColumn(2).width = 30;
+        // --- FIX: SETTING LEBAR KOLOM ---
+        for (let i = 3; i <= 19; i++) { // C - S
+            worksheet.getColumn(i).width = 15;
+        }
+        worksheet.getColumn(1).width = 5;  
+        worksheet.getColumn(2).width = 30; // Bulan
 
-        // Header (Sama dengan Bulanan, ganti text Tanggal jadi Bulan)
-        worksheet.mergeCells('A1:R1'); worksheet.getCell('A1').value = `REKAMAN TIMBULAN SAMPAH - TAHUN ${targetYear}`;
+        // Header
+        worksheet.mergeCells('A1:R1');
+        worksheet.getCell('A1').value = `REKAMAN TIMBULAN SAMPAH - TAHUN ${targetYear}`;
         worksheet.getCell('A1').font = { bold: true, size: 14 };
         worksheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
 
         worksheet.mergeCells('A3:A5'); worksheet.getCell('A3').value = 'No';
         worksheet.mergeCells('B3:B5'); worksheet.getCell('B3').value = 'Bulan';
 
-        // Header Areas (Sama persis)
         worksheet.mergeCells('C3:F3'); worksheet.getCell('C3').value = 'Area Kantor';
         worksheet.getCell('C4').value = 'Sampah'; worksheet.getCell('D4').value = 'Sampah'; worksheet.getCell('E4').value = 'Sampah'; worksheet.getCell('F4').value = 'Total';
         worksheet.getCell('C5').value = 'Organik'; worksheet.getCell('D5').value = 'Anorganik'; worksheet.getCell('E5').value = 'Lainnya'; worksheet.getCell('F5').value = '(Kg)';
@@ -466,79 +493,104 @@ app.get('/api/export/yearly', async (req, res) => {
             worksheet.getCell(cell).font = { bold: true };
             worksheet.getCell(cell).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
         });
-        for (let r = 4; r <= 5; r++) { worksheet.getRow(r).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }; }
 
-        // Isi Data (Loop 0-11)
+        for (let r = 4; r <= 5; r++) {
+             worksheet.getRow(r).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        }
+
         for (let m = 0; m < 12; m++) {
-            const r = reportData[m];
-            const kt = r['Area Kantor'].organik + r['Area Kantor'].anorganik + r['Area Kantor'].residu;
-            const pt = r['Area Parkir'].organik + r['Area Parkir'].anorganik + r['Area Parkir'].residu;
-            const mt = r['Area Makan'].organik + r['Area Makan'].anorganik + r['Area Makan'].residu;
-            const tt = r['Area Ruang Tunggu'].organik + r['Area Ruang Tunggu'].anorganik + r['Area Ruang Tunggu'].residu;
-            const dt = kt + pt + mt + tt;
+            const rowData = reportData[m];
+            const rowNum = m + 6; 
 
-            const row = worksheet.getRow(m + 6);
-            row.values = [ m + 1, monthNames[m], 
-                r['Area Kantor'].organik, r['Area Kantor'].anorganik, r['Area Kantor'].residu, kt,
-                r['Area Parkir'].organik, r['Area Parkir'].anorganik, r['Area Parkir'].residu, pt,
-                r['Area Makan'].organik, r['Area Makan'].anorganik, r['Area Makan'].residu, mt,
-                r['Area Ruang Tunggu'].organik, r['Area Ruang Tunggu'].anorganik, r['Area Ruang Tunggu'].residu, tt,
-                dt 
+            const k_org = rowData['Area Kantor'].organik; const k_ano = rowData['Area Kantor'].anorganik; const k_res = rowData['Area Kantor'].residu;
+            const k_tot = k_org + k_ano + k_res;
+
+            const p_org = rowData['Area Parkir'].organik; const p_ano = rowData['Area Parkir'].anorganik; const p_res = rowData['Area Parkir'].residu;
+            const p_tot = p_org + p_ano + p_res;
+
+            const m_org = rowData['Area Makan'].organik; const m_ano = rowData['Area Makan'].anorganik; const m_res = rowData['Area Makan'].residu;
+            const m_tot = m_org + m_ano + m_res;
+
+            const t_org = rowData['Area Ruang Tunggu'].organik; const t_ano = rowData['Area Ruang Tunggu'].anorganik; const t_res = rowData['Area Ruang Tunggu'].residu;
+            const t_tot = t_org + t_ano + t_res;
+
+            const monthlyTotal = k_tot + p_tot + m_tot + t_tot;
+
+            const row = worksheet.getRow(rowNum);
+            row.values = [
+                m + 1, monthNames[m], 
+                k_org, k_ano, k_res, k_tot, 
+                p_org, p_ano, p_res, p_tot, 
+                m_org, m_ano, m_res, m_tot, 
+                t_org, t_ano, t_res, t_tot, 
+                monthlyTotal
             ];
         }
 
-        // Footer
+        // --- FOOTER ---
         const rowTotalKg = 12 + 6; 
         worksheet.getCell(`A${rowTotalKg}`).value = 'Total/jenis (kg/tahun)';
         worksheet.mergeCells(`A${rowTotalKg}:B${rowTotalKg}`);
+        worksheet.getCell(`A${rowTotalKg}`).font = { bold: true };
+        worksheet.getCell(`A${rowTotalKg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } }; 
+
+        for(let col=3; col<=19; col++) {
+            const colLetter = worksheet.getColumn(col).letter;
+            worksheet.getCell(`${colLetter}${rowTotalKg}`).value = { formula: `SUM(${colLetter}6:${colLetter}${rowTotalKg-1})` };
+            worksheet.getCell(`${colLetter}${rowTotalKg}`).font = { bold: true };
+            worksheet.getCell(`${colLetter}${rowTotalKg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
+        }
+
         const rowTotalTon = rowTotalKg + 1; 
         worksheet.getCell(`A${rowTotalTon}`).value = 'Total/jenis (ton/tahun)';
         worksheet.mergeCells(`A${rowTotalTon}:B${rowTotalTon}`);
-        const rowAvg = rowTotalTon + 1; 
-        worksheet.getCell(`A${rowAvg}`).value = 'Rata-rata perhari (kg/hari)';
-        worksheet.mergeCells(`A${rowAvg}:B${rowAvg}`);
+        worksheet.getCell(`A${rowTotalTon}`).font = { bold: true };
+        worksheet.getCell(`A${rowTotalTon}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFCCBC' } }; 
+
+        for(let col=3; col<=19; col++) {
+            const colLetter = worksheet.getColumn(col).letter;
+            worksheet.getCell(`${colLetter}${rowTotalTon}`).value = { formula: `${colLetter}${rowTotalKg}/1000` };
+            worksheet.getCell(`${colLetter}${rowTotalTon}`).numFmt = '0.000';
+            worksheet.getCell(`${colLetter}${rowTotalTon}`).font = { bold: true };
+            worksheet.getCell(`${colLetter}${rowTotalTon}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFCCBC' } };
+        }
 
         const daysInYear = (targetYear % 4 === 0 && targetYear % 100 > 0) || targetYear % 400 === 0 ? 366 : 365;
 
+        const rowAvg = rowTotalTon + 1; 
+        worksheet.getCell(`A${rowAvg}`).value = 'Rata-rata perhari (kg/hari)';
+        worksheet.mergeCells(`A${rowAvg}:B${rowAvg}`);
+        worksheet.getCell(`A${rowAvg}`).font = { bold: true };
+        worksheet.getCell(`A${rowAvg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } }; 
+
         for(let col=3; col<=19; col++) {
-            const l = worksheet.getColumn(col).letter;
-            worksheet.getCell(`${l}${rowTotalKg}`).value = { formula: `SUM(${l}6:${l}${rowTotalKg-1})` };
-            worksheet.getCell(`${l}${rowTotalTon}`).value = { formula: `${l}${rowTotalKg}/1000` };
-            worksheet.getCell(`${l}${rowTotalTon}`).numFmt = '0.000';
-            worksheet.getCell(`${l}${rowAvg}`).value = { formula: `${l}${rowTotalKg}/${daysInYear}` };
-            worksheet.getCell(`${l}${rowAvg}`).numFmt = '0.00';
+            const colLetter = worksheet.getColumn(col).letter;
+            worksheet.getCell(`${colLetter}${rowAvg}`).value = { formula: `${colLetter}${rowTotalKg}/${daysInYear}` };
+            worksheet.getCell(`${colLetter}${rowAvg}`).numFmt = '0.00'; 
+            worksheet.getCell(`${colLetter}${rowAvg}`).font = { bold: true };
+            worksheet.getCell(`${colLetter}${rowAvg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
         }
 
-        [rowTotalKg, rowTotalTon, rowAvg].forEach(r => {
-            const cellA = worksheet.getCell(`A${r}`);
-            cellA.font = { bold: true };
-            cellA.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
-            for(let c=3; c<=19; c++) {
-                const cell = worksheet.getCell(`${worksheet.getColumn(c).letter}${r}`);
-                cell.font = { bold: true };
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: (r === rowTotalTon ? 'FFFFCCBC' : 'FFFFE0B2') } };
-            }
-        });
-
-        worksheet.eachRow((row) => {
+        worksheet.eachRow((row, rowNumber) => {
             row.eachCell((cell) => {
-                cell.border = { top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'} };
-                cell.alignment = { horizontal: 'center', vertical: 'middle' };
+                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+                cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
             });
         });
 
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename=Laporan_Tahunan.xlsx`);
+        res.setHeader('Content-Disposition', `attachment; filename=Laporan_Tahunan_${targetYear}.xlsx`);
+
         await workbook.xlsx.write(res);
         res.end();
 
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: 'Error export.' });
+        console.error('Error saat ekspor Tahunan:', err.message);
+        res.status(500).json({ message: 'Gagal membuat file Excel.' });
     }
 });
 
-// --- EXPORT APP ---
+// --- EXPORT APP (VERCEL) ---
 if (require.main === module) {
     app.listen(PORT, () => console.log(`Server berjalan di http://localhost:${PORT}`));
 }
