@@ -56,6 +56,7 @@ app.post('/api/login', async (req, res) => {
 });
 
 // --- UPLOAD (VERCEL MODE: MEMORY + BOM FIX) ---
+// 2. UPLOAD (VERCEL MODE + REALTIME UPLOAD DATE)
 app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
   if (!req.files || req.files.length === 0) return res.status(400).json({ message: 'Tidak ada file.' });
 
@@ -64,31 +65,23 @@ app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
   const processFile = (file) => {
     return new Promise((resolve, reject) => {
       const rowData = [];
-      
-      // Baca dari BUFFER (RAM)
       Readable.from(file.buffer)
-        .pipe(csv({
-            mapHeaders: ({ header }) => header.trim().replace(/^\uFEFF/, '') // Fix BOM (karakter hantu)
-        }))
+        .pipe(csv({ mapHeaders: ({ header }) => header.trim().replace(/^\uFEFF/, '') }))
         .on('data', (data) => rowData.push(data))
         .on('error', (err) => reject(err))
         .on('end', async () => {
             if (rowData.length === 0) return resolve({ status: 'error', file: file.originalname, reason: 'File kosong' });
             
-            // Gunakan pool.connect untuk transaksi
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
                 for (const row of rowData) {
-                    // Fix Format Tanggal (DD/MM/YYYY -> Date Object)
-                    let dateTimeString = row['Waktu Catat']?.replace(/"/g, '') || '';
-                    dateTimeString = dateTimeString.replace('.', ':');
-                    const parsableDateString = dateTimeString.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$2/$1/$3'); 
-                    let recordedAt = new Date(parsableDateString);
-                    if (isNaN(recordedAt.getTime())) {
-                         const isoDate = new Date(dateTimeString);
-                         if (!isNaN(isoDate.getTime())) recordedAt = isoDate;
-                    }
+                    
+                    // --- PERBAIKAN WAKTU DI SINI ---
+                    // Kita abaikan kolom 'Waktu Catat' dari CSV karena sering error format.
+                    // Kita gunakan WAKTU SERVER SAAT INI (Real-time Upload).
+                    let recordedAt = new Date(); 
+                    // -------------------------------
 
                     const queryText = `
                         INSERT INTO waste_records 
@@ -116,21 +109,10 @@ app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
 
   try {
     const promises = req.files.map(file => processFile(file));
-    const results = await Promise.all(promises);
-    results.forEach(r => {
-        if (r.status === 'success') {
-            resultsSummary.success.push(r.file);
-            resultsSummary.totalRows += r.count;
-        } else {
-            resultsSummary.failed.push(`${r.file} (${r.reason})`);
-        }
-    });
-    let message = `Berhasil: ${resultsSummary.success.length} file (${resultsSummary.totalRows} data).`;
-    if (resultsSummary.failed.length > 0) message += ` Gagal: ${resultsSummary.failed.join(', ')}`;
-    res.json({ message, previewData: [] });
+    await Promise.all(promises);
+    res.json({ message: 'Upload berhasil. Data disimpan sesuai waktu upload.' });
   } catch (err) {
-    console.error('System Error:', err);
-    res.status(500).json({ message: 'Terjadi kesalahan sistem.' });
+    res.status(500).json({ message: 'Server Error' });
   }
 });
 
