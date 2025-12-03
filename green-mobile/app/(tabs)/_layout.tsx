@@ -1,35 +1,40 @@
-import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Tabs } from 'expo-router';
 import React from 'react';
+import { Image } from 'react-native'; // 1. Pastikan Image diimport
 
-function TabBarIcon(props: {
-  name: React.ComponentProps<typeof FontAwesome>['name'];
-  color: string;
-}) {
-  return <FontAwesome size={28} style={{ marginBottom: -3 }} {...props} />;
+// 2. Komponen Icon Khusus Gambar PNG
+function TabBarIcon({ source, color }: { source: any, color: string }) {
+  return (
+    <Image 
+      source={source} 
+      style={{ 
+        width: 24, 
+        height: 24, 
+        tintColor: color, // Ini yang mengubah warna jadi hijau/abu otomatis
+        marginBottom: -3 
+      }} 
+      resizeMode="contain"
+    />
+  );
 }
 
-// Komponen tab layout
 export default function TabLayout() {
   return (
-    <Tabs>
+    <Tabs screenOptions={{ tabBarActiveTintColor: '#1D5D50' }}>
       <Tabs.Screen
         name="pencatatan"
         options={{
           title: 'Input Data',
-          tabBarIcon: ({ color }) => (
-            <TabBarIcon name="edit" color={color} />
-          ),
+          // 3. Panggil file PNG 'edit.png'
+          tabBarIcon: ({ color }) => <TabBarIcon source={require('../../assets/images/edit.png')} color={color} />,
         }}
       />
-
       <Tabs.Screen
         name="tentang"
         options={{
           title: 'Tentang',
-          tabBarIcon: ({ color }) => (
-            <TabBarIcon name="info-circle" color={color} />
-          ),
+          // 4. Panggil file PNG 'info.png'
+          tabBarIcon: ({ color }) => <TabBarIcon source={require('../../assets/images/info.png')} color={color} />,
         }}
       />
     </Tabs>

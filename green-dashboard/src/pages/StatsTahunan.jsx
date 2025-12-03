@@ -5,7 +5,6 @@ import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recha
 
 const COLORS = ['#27ae60', '#f39c12', '#c0392b']; 
 
-// Helper Dropdown
 const generateYearOptions = () => {
   const currentYear = new Date().getFullYear();
   const years = [];
@@ -64,142 +63,107 @@ function StatsTahunan() {
     fetchData();
   }, [navigate, selectedYear]); 
 
-  // Helper Load PDFMake
-  const loadScript = (src) => {
-    return new Promise((resolve, reject) => {
-      if (document.querySelector(`script[src="${src}"]`)) return resolve();
-      const script = document.createElement('script');
-      script.src = src;
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error(`Failed to load script ${src}`));
-      document.body.appendChild(script);
-    });
-  };
+  const loadScript = (src) => { return new Promise((resolve) => { const s = document.createElement('script'); s.src = src; s.onload = resolve; document.body.appendChild(s); }); };
 
-  // --- EKSPOR PDF TAHUNAN (MATRIKS BULAN) ---
   const handleExportPDF = async () => {
     setIsExporting(true);
     try {
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js');
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js');
 
-      // 1. AGREGASI DATA MENJADI 12 BULAN
       const reportData = {};
-      const monthNames = [
-        'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 
-        'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'
-      ];
-      
+      const monthNames = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
       for (let m = 0; m < 12; m++) {
-        reportData[m] = {
-            'Area Kantor': { organik: 0, anorganik: 0, residu: 0 },
-            'Area Parkir': { organik: 0, anorganik: 0, residu: 0 },
-            'Area Makan': { organik: 0, anorganik: 0, residu: 0 },
-            'Area Ruang Tunggu': { organik: 0, anorganik: 0, residu: 0 },
-        };
+        reportData[m] = { 'Area Kantor':{o:0,a:0,r:0}, 'Area Parkir':{o:0,a:0,r:0}, 'Area Makan':{o:0,a:0,r:0}, 'Area Ruang Tunggu':{o:0,a:0,r:0} };
       }
 
       tableData.forEach(row => {
         const dateObj = new Date(row.recorded_at);
-        const monthIndex = dateObj.getMonth(); // 0-11
-        
-        let area = row.area_label ? row.area_label.trim() : '';
-        const status = row.status ? row.status.trim() : '';
-        const weight = parseFloat(row.weight_kg) || 0;
+        const monthIndex = dateObj.getMonth(); 
+        let area = row.area_label || '';
+        let w = parseFloat(row.weight_kg) || 0;
+        let key = null;
+        if (area.toLowerCase().includes('kantor')) key = 'Area Kantor';
+        else if (area.toLowerCase().includes('parkir')) key = 'Area Parkir';
+        else if (area.toLowerCase().includes('makan')) key = 'Area Makan';
+        else if (area.toLowerCase().includes('tunggu')) key = 'Area Ruang Tunggu';
 
-        let targetAreaKey = null;
-        if (area.toLowerCase().includes('kantor')) targetAreaKey = 'Area Kantor';
-        else if (area.toLowerCase().includes('parkir')) targetAreaKey = 'Area Parkir';
-        else if (area.toLowerCase().includes('makan')) targetAreaKey = 'Area Makan';
-        else if (area.toLowerCase().includes('tunggu')) targetAreaKey = 'Area Ruang Tunggu';
-
-        if (targetAreaKey) {
-            if (status === 'Organik Terpilah') reportData[monthIndex][targetAreaKey].organik += weight;
-            else if (status === 'Anorganik Terpilah') reportData[monthIndex][targetAreaKey].anorganik += weight;
-            else if (status === 'Tidak Terkelola') reportData[monthIndex][targetAreaKey].residu += weight;
+        if (key) {
+            if (row.status === 'Organik Terpilah') reportData[monthIndex][key].o += w;
+            else if (row.status === 'Anorganik Terpilah') reportData[monthIndex][key].a += w;
+            else reportData[monthIndex][key].r += w;
         }
       });
 
-      // 2. BANGUN BODY PDF
+      const totals = { k_o:0, k_a:0, k_r:0, k_t:0, p_o:0, p_a:0, p_r:0, p_t:0, m_o:0, m_a:0, m_r:0, m_t:0, t_o:0, t_a:0, t_r:0, t_t:0, grand:0 };
       const body = [];
-
-      // Header 1
+      // HEADER 1-3 SAMA SEPERTI BULANAN (Ganti Tanggal jadi Bulan)
+      // (Saya copy struktur header dari bulanan tapi ganti text)
       const headerRow1 = [
         { text: 'No', rowSpan: 3, style: 'tableHeader' },
-        { text: 'Bulan', rowSpan: 3, style: 'tableHeader' }, // Beda: Bulan
+        { text: 'Bulan', rowSpan: 3, style: 'tableHeader' },
         { text: 'Area Kantor', colSpan: 4, style: 'tableHeader' }, {}, {}, {},
         { text: 'Area Parkir', colSpan: 4, style: 'tableHeader' }, {}, {}, {},
         { text: 'Area Makan', colSpan: 4, style: 'tableHeader' }, {}, {}, {},
         { text: 'Area Ruang Tunggu', colSpan: 4, style: 'tableHeader' }, {}, {}, {},
         { text: 'TOTAL', rowSpan: 3, style: 'tableHeader' } 
       ];
-      
-      // Header 2
-      const headerRow2 = [
-        {}, {},
-        { text: 'Org', style: 'tableHeader' }, { text: 'Anorg', style: 'tableHeader' }, { text: 'Lain', style: 'tableHeader' }, { text: 'Jml', style: 'tableHeader' },
-        { text: 'Org', style: 'tableHeader' }, { text: 'Anorg', style: 'tableHeader' }, { text: 'Lain', style: 'tableHeader' }, { text: 'Jml', style: 'tableHeader' },
-        { text: 'Org', style: 'tableHeader' }, { text: 'Anorg', style: 'tableHeader' }, { text: 'Lain', style: 'tableHeader' }, { text: 'Jml', style: 'tableHeader' },
-        { text: 'Org', style: 'tableHeader' }, { text: 'Anorg', style: 'tableHeader' }, { text: 'Lain', style: 'tableHeader' }, { text: 'Jml', style: 'tableHeader' },
-        {}
-      ];
-      
+      const headerRow2 = [ {}, {}, { text: 'Org', style: 'tableHeader' }, { text: 'Anorg', style: 'tableHeader' }, { text: 'Lain', style: 'tableHeader' }, { text: 'Jml', style: 'tableHeader' }, { text: 'Org', style: 'tableHeader' }, { text: 'Anorg', style: 'tableHeader' }, { text: 'Lain', style: 'tableHeader' }, { text: 'Jml', style: 'tableHeader' }, { text: 'Org', style: 'tableHeader' }, { text: 'Anorg', style: 'tableHeader' }, { text: 'Lain', style: 'tableHeader' }, { text: 'Jml', style: 'tableHeader' }, { text: 'Org', style: 'tableHeader' }, { text: 'Anorg', style: 'tableHeader' }, { text: 'Lain', style: 'tableHeader' }, { text: 'Jml', style: 'tableHeader' }, {} ];
       const headerRow3 = [{},{}, {},{},{},{}, {},{},{},{}, {},{},{},{}, {},{},{},{}, {}];
-
-      body.push(headerRow1);
-      body.push(headerRow2);
-      body.push(headerRow3);
-
-      // Loop Data Bulanan
-      let grandTotalYear = 0;
+      body.push(headerRow1); body.push(headerRow2); body.push(headerRow3);
 
       for (let m = 0; m < 12; m++) {
-        const r = reportData[m];
-        
-        const k_tot = r['Area Kantor'].organik + r['Area Kantor'].anorganik + r['Area Kantor'].residu;
-        const p_tot = r['Area Parkir'].organik + r['Area Parkir'].anorganik + r['Area Parkir'].residu;
-        const m_tot = r['Area Makan'].organik + r['Area Makan'].anorganik + r['Area Makan'].residu;
-        const t_tot = r['Area Ruang Tunggu'].organik + r['Area Ruang Tunggu'].anorganik + r['Area Ruang Tunggu'].residu;
-        
-        const monthlyTotal = k_tot + p_tot + m_tot + t_tot;
-        grandTotalYear += monthlyTotal;
+          const r = reportData[m];
+          const kt=r['Area Kantor'].o+r['Area Kantor'].a+r['Area Kantor'].r;
+          const pt=r['Area Parkir'].o+r['Area Parkir'].a+r['Area Parkir'].r;
+          const mt=r['Area Makan'].o+r['Area Makan'].a+r['Area Makan'].r;
+          const tt=r['Area Ruang Tunggu'].o+r['Area Ruang Tunggu'].a+r['Area Ruang Tunggu'].r;
+          const dt=kt+pt+mt+tt;
 
-        const row = [
-            { text: (m+1).toString(), style: 'tableCell' },
-            { text: monthNames[m], style: 'tableCell' }, // Nama Bulan
-            // Kantor
-            { text: r['Area Kantor'].organik || '-', style: 'tableCell' },
-            { text: r['Area Kantor'].anorganik || '-', style: 'tableCell' },
-            { text: r['Area Kantor'].residu || '-', style: 'tableCell' },
-            { text: k_tot || '-', style: 'tableBold' },
-            // Parkir
-            { text: r['Area Parkir'].organik || '-', style: 'tableCell' },
-            { text: r['Area Parkir'].anorganik || '-', style: 'tableCell' },
-            { text: r['Area Parkir'].residu || '-', style: 'tableCell' },
-            { text: p_tot || '-', style: 'tableBold' },
-            // Makan
-            { text: r['Area Makan'].organik || '-', style: 'tableCell' },
-            { text: r['Area Makan'].anorganik || '-', style: 'tableCell' },
-            { text: r['Area Makan'].residu || '-', style: 'tableCell' },
-            { text: m_tot || '-', style: 'tableBold' },
-            // Tunggu
-            { text: r['Area Ruang Tunggu'].organik || '-', style: 'tableCell' },
-            { text: r['Area Ruang Tunggu'].anorganik || '-', style: 'tableCell' },
-            { text: r['Area Ruang Tunggu'].residu || '-', style: 'tableCell' },
-            { text: t_tot || '-', style: 'tableBold' },
-            // TOTAL BULANAN
-            { text: monthlyTotal.toFixed(2), style: 'tableBold' }
-        ];
-        body.push(row);
+          totals.k_o+=r['Area Kantor'].o; totals.k_a+=r['Area Kantor'].a; totals.k_r+=r['Area Kantor'].r; totals.k_t+=kt;
+          totals.p_o+=r['Area Parkir'].o; totals.p_a+=r['Area Parkir'].a; totals.p_r+=r['Area Parkir'].r; totals.p_t+=pt;
+          totals.m_o+=r['Area Makan'].o; totals.m_a+=r['Area Makan'].a; totals.m_r+=r['Area Makan'].r; totals.m_t+=mt;
+          totals.t_o+=r['Area Ruang Tunggu'].o; totals.t_a+=r['Area Ruang Tunggu'].a; totals.t_r+=r['Area Ruang Tunggu'].r; totals.t_t+=tt;
+          totals.grand += dt;
+
+          body.push([
+            { text: (m+1).toString(), style: 'tableCell' }, { text: monthNames[m], style: 'tableCell' },
+            { text: r['Area Kantor'].o||'-', style:'tableCell' }, { text: r['Area Kantor'].a||'-', style:'tableCell' }, { text: r['Area Kantor'].r||'-', style:'tableCell' }, { text: kt||'-', style:'tableBold' },
+            { text: r['Area Parkir'].o||'-', style:'tableCell' }, { text: r['Area Parkir'].a||'-', style:'tableCell' }, { text: r['Area Parkir'].r||'-', style:'tableCell' }, { text: pt||'-', style:'tableBold' },
+            { text: r['Area Makan'].o||'-', style:'tableCell' }, { text: r['Area Makan'].a||'-', style:'tableCell' }, { text: r['Area Makan'].r||'-', style:'tableCell' }, { text: mt||'-', style:'tableBold' },
+            { text: r['Area Ruang Tunggu'].o||'-', style:'tableCell' }, { text: r['Area Ruang Tunggu'].a||'-', style:'tableCell' }, { text: r['Area Ruang Tunggu'].r||'-', style:'tableCell' }, { text: tt||'-', style:'tableBold' },
+            { text: dt.toFixed(2), style: 'tableBold' }
+          ]);
       }
 
-      // Baris Total Tahunan
-      const totalRow = [
-          { text: 'TOTAL TAHUN', colSpan: 18, style: 'tableHeader', alignment: 'right' },
-          {},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},
-          { text: grandTotalYear.toFixed(2), style: 'tableHeader' }
-      ];
-      body.push(totalRow);
+      const daysInYear = (selectedYear%4===0) ? 366 : 365;
+      // Footer Kg
+      body.push([
+          { text:'Total (kg)', colSpan:2, style:'bold', fillColor:'#ffe0b2' }, {},
+          { text: totals.k_o.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.k_a.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.k_r.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.k_t.toFixed(2), style:'bold', fillColor:'#ffe0b2' },
+          { text: totals.p_o.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.p_a.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.p_r.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.p_t.toFixed(2), style:'bold', fillColor:'#ffe0b2' },
+          { text: totals.m_o.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.m_a.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.m_r.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.m_t.toFixed(2), style:'bold', fillColor:'#ffe0b2' },
+          { text: totals.t_o.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.t_a.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.t_r.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.t_t.toFixed(2), style:'bold', fillColor:'#ffe0b2' },
+          { text: totals.grand.toFixed(2), style:'bold', fillColor:'#ffe0b2' }
+      ]);
+      // Footer Ton
+      body.push([
+          { text:'Total (ton)', colSpan:2, style:'bold', fillColor:'#ffccbc' }, {},
+          { text: (totals.k_o/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.k_a/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.k_r/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.k_t/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' },
+          { text: (totals.p_o/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.p_a/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.p_r/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.p_t/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' },
+          { text: (totals.m_o/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.m_a/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.m_r/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.m_t/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' },
+          { text: (totals.t_o/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.t_a/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.t_r/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.t_t/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' },
+          { text: (totals.grand/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }
+      ]);
+      // Footer Avg
+      body.push([
+          { text:'Rata-rata (kg/hari)', colSpan:2, style:'bold', fillColor:'#ffe0b2' }, {},
+          { text: (totals.k_o/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.k_a/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.k_r/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.k_t/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' },
+          { text: (totals.p_o/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.p_a/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.p_r/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.p_t/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' },
+          { text: (totals.m_o/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.m_a/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.m_r/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.m_t/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' },
+          { text: (totals.t_o/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.t_a/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.t_r/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.t_t/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' },
+          { text: (totals.grand/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }
+      ]);
 
       const docDefinition = {
         pageOrientation: 'landscape',
@@ -210,72 +174,47 @@ function StatsTahunan() {
           {
             style: 'tableExample',
             table: {
-              headerRows: 3, 
+              headerRows: 3,
               widths: [15, 30,  22,22,22,25,  22,22,22,25,  22,22,22,25,  22,22,22,25, 35],
               body: body
             },
-            layout: {
-                fillColor: function (rowIndex) {
-                    return (rowIndex < 3 || rowIndex === body.length - 1) ? '#f1c40f' : null; 
-                }
-            }
+            layout: { fillColor: function (rowIndex) { return (rowIndex < 3 || rowIndex >= body.length - 3) ? '#f1c40f' : null; } }
           }
         ],
         styles: {
           header: { fontSize: 14, bold: true, margin: [0, 0, 0, 5], alignment: 'center' },
           subheader: { fontSize: 10, margin: [0, 0, 0, 10], alignment: 'center' },
-          tableHeader: { bold: true, fontSize: 6, color: 'black', alignment: 'center' }, 
+          tableHeader: { bold: true, fontSize: 6, color: 'black', alignment: 'center' },
           tableCell: { fontSize: 6, alignment: 'center' },
           tableBold: { fontSize: 6, bold: true, alignment: 'center' }
         }
       };
 
-      window.pdfMake.createPdf(docDefinition).download(`Laporan_Tahunan_${selectedYear}.pdf`);
+      window.pdfMake.createPdf(docDefinition).download(`Laporan Timbulan Sampah Tahun ${selectedYear}.pdf`);
 
-    } catch (error) {
-      console.error('Error export PDF:', error);
-      alert('Gagal membuat PDF');
-    } finally {
-      setIsExporting(false);
-    }
+    } catch (error) { console.error(error); alert('Gagal membuat PDF'); } finally { setIsExporting(false); }
   };
 
-  // --- EKSPOR EXCEL (PANGGIL BACKEND BARU) ---
   const handleExportXLSX = async () => {
     setIsExporting(true);
     setErrorMessage('');
     const token = localStorage.getItem('adminToken');
-
     try {
       const response = await axios.get('https://proyek-pencatatan-sampah.vercel.app/api/export/yearly', {
         headers: { 'Authorization': `Bearer ${token}` },
         params: { year: selectedYear },
         responseType: 'blob', 
       });
-
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      
-      let filename = `Laporan_Tahunan_${selectedYear}.xlsx`; 
-      const contentDisposition = response.headers['content-disposition'];
-      if (contentDisposition) {
-          const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
-          if (filenameMatch && filenameMatch.length === 2) filename = filenameMatch[1];
-      }
-
+      let filename = `Laporan Timbulan Sampah Tahun ${selectedYear}.xlsx`;
       link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
       link.parentNode.removeChild(link);
       window.URL.revokeObjectURL(url);
-
-    } catch (error) {
-      console.error('Error exporting XLSX:', error);
-      setErrorMessage('Gagal mengekspor Excel.');
-    } finally {
-      setIsExporting(false);
-    }
+    } catch (error) { console.error(error); setErrorMessage('Gagal mengekspor Excel.'); } finally { setIsExporting(false); }
   };
 
   return (
@@ -325,6 +264,7 @@ function StatsTahunan() {
             <table style={styles.table}>
               <thead>
                 <tr>
+                  <th style={{...styles.th, width:'50px', textAlign:'center'}}>No</th>
                   <th style={styles.th}>Area</th>
                   <th style={styles.th}>Nama Item</th>
                   <th style={styles.th}>Pengelola</th>
@@ -338,6 +278,7 @@ function StatsTahunan() {
                 {tableData.length > 0 ? (
                   tableData.map((row, index) => (
                     <tr key={index}>
+                      <td style={{...styles.td, textAlign:'center'}}>{index + 1}</td>
                       <td style={styles.td}>{row.area_label}</td>
                       <td style={styles.td}>{row.item_label}</td>
                       <td style={styles.td}>{row.pengelola}</td>
@@ -349,7 +290,7 @@ function StatsTahunan() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="7" style={{ ...styles.td, textAlign: 'center' }}>Tidak ada data mentah.</td>
+                    <td colSpan="8" style={{ ...styles.td, textAlign: 'center' }}>Tidak ada data mentah.</td>
                   </tr>
                 )}
               </tbody>
@@ -365,10 +306,8 @@ const styles = {
   previewContainer: { marginTop: '2rem' },
   previewTitle: { color: '#333', margin: 0 }, 
   tableHeaderContainer: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' },
-  
   exportButtonXLSX: { backgroundColor: '#1D5D50', color: 'white', padding: '8px 16px', border: 'none', borderRadius: '5px', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' },
   exportButtonPDF: { backgroundColor: '#c0392b', color: 'white', padding: '8px 16px', border: 'none', borderRadius: '5px', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' },
-
   tableWrapper: { maxHeight: '300px', overflowY: 'auto', border: '1px solid #ddd' },
   table: { width: '100%', borderCollapse: 'collapse' },
   th: { padding: '8px 12px', borderBottom: '2px solid #1D5D50', backgroundColor: '#f9f9f9', textAlign: 'left', textTransform: 'capitalize' },

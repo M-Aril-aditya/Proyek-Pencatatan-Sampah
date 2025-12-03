@@ -59,8 +59,6 @@ app.post('/api/login', async (req, res) => {
 app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
   if (!req.files || req.files.length === 0) return res.status(400).json({ message: 'Tidak ada file.' });
 
-  const resultsSummary = { success: [], failed: [], totalRows: 0 };
-
   const processFile = (file) => {
     return new Promise((resolve, reject) => {
       const rowData = [];
@@ -267,6 +265,12 @@ app.get('/api/export/monthly', async (req, res) => {
         const workbook = new excel.Workbook();
         const worksheet = workbook.addWorksheet(`Laporan ${targetMonth}-${targetYear}`);
 
+        // --- HITUNG TOTAL MANUAL (UNTUK FOOTER) ---
+        const grandTotals = {};
+        // Inisialisasi 0 untuk setiap kolom data (C-S)
+        const columnLetters = ['C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S'];
+        columnLetters.forEach(l => grandTotals[l] = 0);
+
         // --- HEADER & MERGE ---
         worksheet.mergeCells('A1:R1');
         worksheet.getCell('A1').value = `REKAMAN TIMBULAN SAMPAH - BULAN ${targetMonth}/${targetYear}`;
@@ -311,33 +315,33 @@ app.get('/api/export/monthly', async (req, res) => {
              worksheet.getRow(r).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
         }
 
-        // Isi Data Harian
+        // Isi Data Harian & Hitung Total Manual
         for (let d = 1; d <= daysInMonth; d++) {
-            const rowData = reportData[d];
-            const rowNum = d + 5; 
+            const r = reportData[d];
+            
+            const vals = {
+                'C': r['Area Kantor'].organik, 'D': r['Area Kantor'].anorganik, 'E': r['Area Kantor'].residu,
+                'F': r['Area Kantor'].organik + r['Area Kantor'].anorganik + r['Area Kantor'].residu,
+                'G': r['Area Parkir'].organik, 'H': r['Area Parkir'].anorganik, 'I': r['Area Parkir'].residu,
+                'J': r['Area Parkir'].organik + r['Area Parkir'].anorganik + r['Area Parkir'].residu,
+                'K': r['Area Makan'].organik, 'L': r['Area Makan'].anorganik, 'M': r['Area Makan'].residu,
+                'N': r['Area Makan'].organik + r['Area Makan'].anorganik + r['Area Makan'].residu,
+                'O': r['Area Ruang Tunggu'].organik, 'P': r['Area Ruang Tunggu'].anorganik, 'Q': r['Area Ruang Tunggu'].residu,
+                'R': r['Area Ruang Tunggu'].organik + r['Area Ruang Tunggu'].anorganik + r['Area Ruang Tunggu'].residu,
+            };
+            vals['S'] = vals['F'] + vals['J'] + vals['N'] + vals['R'];
 
-            const k_org = rowData['Area Kantor'].organik; const k_ano = rowData['Area Kantor'].anorganik; const k_res = rowData['Area Kantor'].residu;
-            const k_tot = k_org + k_ano + k_res;
+            // Add to Grand Total
+            for(let key in vals) { grandTotals[key] += vals[key]; }
 
-            const p_org = rowData['Area Parkir'].organik; const p_ano = rowData['Area Parkir'].anorganik; const p_res = rowData['Area Parkir'].residu;
-            const p_tot = p_org + p_ano + p_res;
-
-            const m_org = rowData['Area Makan'].organik; const m_ano = rowData['Area Makan'].anorganik; const m_res = rowData['Area Makan'].residu;
-            const m_tot = m_org + m_ano + m_res;
-
-            const t_org = rowData['Area Ruang Tunggu'].organik; const t_ano = rowData['Area Ruang Tunggu'].anorganik; const t_res = rowData['Area Ruang Tunggu'].residu;
-            const t_tot = t_org + t_ano + t_res;
-
-            const dailyTotal = k_tot + p_tot + m_tot + t_tot;
-
-            const row = worksheet.getRow(rowNum);
+            const row = worksheet.getRow(d + 5);
             row.values = [
                 d, d,
-                k_org, k_ano, k_res, k_tot,
-                p_org, p_ano, p_res, p_tot,
-                m_org, m_ano, m_res, m_tot,
-                t_org, t_ano, t_res, t_tot,
-                dailyTotal
+                vals['C'], vals['D'], vals['E'], vals['F'],
+                vals['G'], vals['H'], vals['I'], vals['J'],
+                vals['K'], vals['L'], vals['M'], vals['N'],
+                vals['O'], vals['P'], vals['Q'], vals['R'],
+                vals['S']
             ];
         }
 
@@ -349,10 +353,10 @@ app.get('/api/export/monthly', async (req, res) => {
         worksheet.getCell(`A${rowTotalKg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } }; 
 
         for(let col=3; col<=19; col++) {
-            const colLetter = worksheet.getColumn(col).letter;
-            worksheet.getCell(`${colLetter}${rowTotalKg}`).value = { formula: `SUM(${colLetter}6:${colLetter}${rowTotalKg-1})` };
-            worksheet.getCell(`${colLetter}${rowTotalKg}`).font = { bold: true };
-            worksheet.getCell(`${colLetter}${rowTotalKg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
+            const l = worksheet.getColumn(col).letter;
+            worksheet.getCell(`${l}${rowTotalKg}`).value = grandTotals[l]; // NILAI MANUAL
+            worksheet.getCell(`${l}${rowTotalKg}`).font = { bold: true };
+            worksheet.getCell(`${l}${rowTotalKg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
         }
 
         const rowTotalTon = rowTotalKg + 1; 
@@ -362,11 +366,11 @@ app.get('/api/export/monthly', async (req, res) => {
         worksheet.getCell(`A${rowTotalTon}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFCCBC' } }; 
 
         for(let col=3; col<=19; col++) {
-            const colLetter = worksheet.getColumn(col).letter;
-            worksheet.getCell(`${colLetter}${rowTotalTon}`).value = { formula: `${colLetter}${rowTotalKg}/1000` };
-            worksheet.getCell(`${colLetter}${rowTotalTon}`).numFmt = '0.000';
-            worksheet.getCell(`${colLetter}${rowTotalTon}`).font = { bold: true };
-            worksheet.getCell(`${colLetter}${rowTotalTon}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFCCBC' } };
+            const l = worksheet.getColumn(col).letter;
+            worksheet.getCell(`${l}${rowTotalTon}`).value = grandTotals[l] / 1000; // NILAI MANUAL
+            worksheet.getCell(`${l}${rowTotalTon}`).numFmt = '0.000';
+            worksheet.getCell(`${l}${rowTotalTon}`).font = { bold: true };
+            worksheet.getCell(`${l}${rowTotalTon}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFCCBC' } };
         }
 
         const rowAvg = rowTotalTon + 1; 
@@ -376,11 +380,11 @@ app.get('/api/export/monthly', async (req, res) => {
         worksheet.getCell(`A${rowAvg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } }; 
 
         for(let col=3; col<=19; col++) {
-            const colLetter = worksheet.getColumn(col).letter;
-            worksheet.getCell(`${colLetter}${rowAvg}`).value = { formula: `${colLetter}${rowTotalKg}/${daysInMonth}` };
-            worksheet.getCell(`${colLetter}${rowAvg}`).numFmt = '0.00'; 
-            worksheet.getCell(`${colLetter}${rowAvg}`).font = { bold: true };
-            worksheet.getCell(`${colLetter}${rowAvg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
+            const l = worksheet.getColumn(col).letter;
+            worksheet.getCell(`${l}${rowAvg}`).value = grandTotals[l] / daysInMonth; // NILAI MANUAL
+            worksheet.getCell(`${l}${rowAvg}`).numFmt = '0.00'; 
+            worksheet.getCell(`${l}${rowAvg}`).font = { bold: true };
+            worksheet.getCell(`${l}${rowAvg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
         }
 
         // Border
@@ -454,6 +458,11 @@ app.get('/api/export/yearly', async (req, res) => {
         const workbook = new excel.Workbook();
         const worksheet = workbook.addWorksheet(`Laporan Tahun ${targetYear}`);
 
+        // --- HITUNG TOTAL MANUAL ---
+        const grandTotals = {};
+        const columnLetters = ['C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S'];
+        columnLetters.forEach(l => grandTotals[l] = 0);
+
         // --- FIX: SETTING LEBAR KOLOM ---
         for (let i = 3; i <= 19; i++) { // C - S
             worksheet.getColumn(i).width = 15;
@@ -499,31 +508,31 @@ app.get('/api/export/yearly', async (req, res) => {
         }
 
         for (let m = 0; m < 12; m++) {
-            const rowData = reportData[m];
-            const rowNum = m + 6; 
+            const r = reportData[m];
+            
+            const vals = {
+                'C': r['Area Kantor'].organik, 'D': r['Area Kantor'].anorganik, 'E': r['Area Kantor'].residu,
+                'F': r['Area Kantor'].organik + r['Area Kantor'].anorganik + r['Area Kantor'].residu,
+                'G': r['Area Parkir'].organik, 'H': r['Area Parkir'].anorganik, 'I': r['Area Parkir'].residu,
+                'J': r['Area Parkir'].organik + r['Area Parkir'].anorganik + r['Area Parkir'].residu,
+                'K': r['Area Makan'].organik, 'L': r['Area Makan'].anorganik, 'M': r['Area Makan'].residu,
+                'N': r['Area Makan'].organik + r['Area Makan'].anorganik + r['Area Makan'].residu,
+                'O': r['Area Ruang Tunggu'].organik, 'P': r['Area Ruang Tunggu'].anorganik, 'Q': r['Area Ruang Tunggu'].residu,
+                'R': r['Area Ruang Tunggu'].organik + r['Area Ruang Tunggu'].anorganik + r['Area Ruang Tunggu'].residu,
+            };
+            vals['S'] = vals['F'] + vals['J'] + vals['N'] + vals['R'];
 
-            const k_org = rowData['Area Kantor'].organik; const k_ano = rowData['Area Kantor'].anorganik; const k_res = rowData['Area Kantor'].residu;
-            const k_tot = k_org + k_ano + k_res;
+            // Accumulate
+            for(let key in vals) { grandTotals[key] += vals[key]; }
 
-            const p_org = rowData['Area Parkir'].organik; const p_ano = rowData['Area Parkir'].anorganik; const p_res = rowData['Area Parkir'].residu;
-            const p_tot = p_org + p_ano + p_res;
-
-            const m_org = rowData['Area Makan'].organik; const m_ano = rowData['Area Makan'].anorganik; const m_res = rowData['Area Makan'].residu;
-            const m_tot = m_org + m_ano + m_res;
-
-            const t_org = rowData['Area Ruang Tunggu'].organik; const t_ano = rowData['Area Ruang Tunggu'].anorganik; const t_res = rowData['Area Ruang Tunggu'].residu;
-            const t_tot = t_org + t_ano + t_res;
-
-            const monthlyTotal = k_tot + p_tot + m_tot + t_tot;
-
-            const row = worksheet.getRow(rowNum);
+            const row = worksheet.getRow(m + 6);
             row.values = [
                 m + 1, monthNames[m], 
-                k_org, k_ano, k_res, k_tot, 
-                p_org, p_ano, p_res, p_tot, 
-                m_org, m_ano, m_res, m_tot, 
-                t_org, t_ano, t_res, t_tot, 
-                monthlyTotal
+                vals['C'], vals['D'], vals['E'], vals['F'],
+                vals['G'], vals['H'], vals['I'], vals['J'],
+                vals['K'], vals['L'], vals['M'], vals['N'],
+                vals['O'], vals['P'], vals['Q'], vals['R'],
+                vals['S']
             ];
         }
 
@@ -531,45 +540,34 @@ app.get('/api/export/yearly', async (req, res) => {
         const rowTotalKg = 12 + 6; 
         worksheet.getCell(`A${rowTotalKg}`).value = 'Total/jenis (kg/tahun)';
         worksheet.mergeCells(`A${rowTotalKg}:B${rowTotalKg}`);
-        worksheet.getCell(`A${rowTotalKg}`).font = { bold: true };
-        worksheet.getCell(`A${rowTotalKg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } }; 
-
-        for(let col=3; col<=19; col++) {
-            const colLetter = worksheet.getColumn(col).letter;
-            worksheet.getCell(`${colLetter}${rowTotalKg}`).value = { formula: `SUM(${colLetter}6:${colLetter}${rowTotalKg-1})` };
-            worksheet.getCell(`${colLetter}${rowTotalKg}`).font = { bold: true };
-            worksheet.getCell(`${colLetter}${rowTotalKg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
-        }
-
         const rowTotalTon = rowTotalKg + 1; 
         worksheet.getCell(`A${rowTotalTon}`).value = 'Total/jenis (ton/tahun)';
         worksheet.mergeCells(`A${rowTotalTon}:B${rowTotalTon}`);
-        worksheet.getCell(`A${rowTotalTon}`).font = { bold: true };
-        worksheet.getCell(`A${rowTotalTon}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFCCBC' } }; 
-
-        for(let col=3; col<=19; col++) {
-            const colLetter = worksheet.getColumn(col).letter;
-            worksheet.getCell(`${colLetter}${rowTotalTon}`).value = { formula: `${colLetter}${rowTotalKg}/1000` };
-            worksheet.getCell(`${colLetter}${rowTotalTon}`).numFmt = '0.000';
-            worksheet.getCell(`${colLetter}${rowTotalTon}`).font = { bold: true };
-            worksheet.getCell(`${colLetter}${rowTotalTon}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFCCBC' } };
-        }
-
-        const daysInYear = (targetYear % 4 === 0 && targetYear % 100 > 0) || targetYear % 400 === 0 ? 366 : 365;
-
         const rowAvg = rowTotalTon + 1; 
         worksheet.getCell(`A${rowAvg}`).value = 'Rata-rata perhari (kg/hari)';
         worksheet.mergeCells(`A${rowAvg}:B${rowAvg}`);
-        worksheet.getCell(`A${rowAvg}`).font = { bold: true };
-        worksheet.getCell(`A${rowAvg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } }; 
+
+        const daysInYear = (targetYear % 4 === 0 && targetYear % 100 > 0) || targetYear % 400 === 0 ? 366 : 365;
 
         for(let col=3; col<=19; col++) {
-            const colLetter = worksheet.getColumn(col).letter;
-            worksheet.getCell(`${colLetter}${rowAvg}`).value = { formula: `${colLetter}${rowTotalKg}/${daysInYear}` };
-            worksheet.getCell(`${colLetter}${rowAvg}`).numFmt = '0.00'; 
-            worksheet.getCell(`${colLetter}${rowAvg}`).font = { bold: true };
-            worksheet.getCell(`${colLetter}${rowAvg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
+            const l = worksheet.getColumn(col).letter;
+            worksheet.getCell(`${l}${rowTotalKg}`).value = grandTotals[l]; // MANUAL
+            worksheet.getCell(`${l}${rowTotalTon}`).value = grandTotals[l] / 1000; // MANUAL
+            worksheet.getCell(`${l}${rowTotalTon}`).numFmt = '0.000';
+            worksheet.getCell(`${l}${rowAvg}`).value = grandTotals[l] / daysInYear; // MANUAL
+            worksheet.getCell(`${l}${rowAvg}`).numFmt = '0.00';
         }
+
+        [rowTotalKg, rowTotalTon, rowAvg].forEach(r => {
+            const cellA = worksheet.getCell(`A${r}`);
+            cellA.font = { bold: true };
+            cellA.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
+            for(let c=3; c<=19; c++) {
+                const cell = worksheet.getCell(`${worksheet.getColumn(c).letter}${r}`);
+                cell.font = { bold: true };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: (r === rowTotalTon ? 'FFFFCCBC' : 'FFFFE0B2') } };
+            }
+        });
 
         worksheet.eachRow((row, rowNumber) => {
             row.eachCell((cell) => {
@@ -592,6 +590,6 @@ app.get('/api/export/yearly', async (req, res) => {
 
 // --- EXPORT APP (VERCEL) ---
 if (require.main === module) {
-    app.listen(PORT, () => console.log(`Server berjalan di http://localhost:${PORT}`));
+    app.listen(PORT, () => console.log(`Server berjalan di http://localhost:${PORT}`));
 }
 module.exports = app;

@@ -74,7 +74,6 @@ function StatsBulanan() {
     fetchData();
   }, [navigate, selectedYear, selectedMonth]); 
 
-  // Helper Load Script PDF
   const loadScript = (src) => {
     return new Promise((resolve, reject) => {
       if (document.querySelector(`script[src="${src}"]`)) return resolve();
@@ -86,7 +85,7 @@ function StatsBulanan() {
     });
   };
 
-  // --- LOGIKA EKSPOR PDF (DENGAN TOTAL HARIAN & BULANAN) ---
+  // --- LOGIKA PDF MATRIKS (Sama seperti sebelumnya) ---
   const handleExportPDF = async () => {
     setIsExporting(true);
     try {
@@ -126,8 +125,7 @@ function StatsBulanan() {
       });
 
       const body = [];
-
-      // Header 1
+      // Header
       const headerRow1 = [
         { text: 'No', rowSpan: 3, style: 'tableHeader' },
         { text: 'Tgl', rowSpan: 3, style: 'tableHeader' },
@@ -135,10 +133,8 @@ function StatsBulanan() {
         { text: 'Area Parkir', colSpan: 4, style: 'tableHeader' }, {}, {}, {},
         { text: 'Area Makan', colSpan: 4, style: 'tableHeader' }, {}, {}, {},
         { text: 'Area Ruang Tunggu', colSpan: 4, style: 'tableHeader' }, {}, {}, {},
-        // Tambahan Kolom Total Harian
         { text: 'TOTAL HARIAN', rowSpan: 3, style: 'tableHeader' } 
       ];
-      // Header 2
       const headerRow2 = [
         {}, {},
         { text: 'Org', style: 'tableHeader' }, { text: 'Anorg', style: 'tableHeader' }, { text: 'Lain', style: 'tableHeader' }, { text: 'Jml', style: 'tableHeader' },
@@ -147,159 +143,65 @@ function StatsBulanan() {
         { text: 'Org', style: 'tableHeader' }, { text: 'Anorg', style: 'tableHeader' }, { text: 'Lain', style: 'tableHeader' }, { text: 'Jml', style: 'tableHeader' },
         {}
       ];
-      
-      // Baris Kosong untuk Spacing Header (menggantikan rowSpan visual di PDFMake)
       const headerRow3 = [{},{}, {},{},{},{}, {},{},{},{}, {},{},{},{}, {},{},{},{}, {}];
-
       body.push(headerRow1);
       body.push(headerRow2);
       body.push(headerRow3);
 
-      // --- AKUMULATOR UNTUK TOTAL BULANAN (VERTIKAL) ---
-      let colTotals = {
-          k_org: 0, k_ano: 0, k_res: 0, k_tot: 0,
-          p_org: 0, p_ano: 0, p_res: 0, p_tot: 0,
-          m_org: 0, m_ano: 0, m_res: 0, m_tot: 0,
-          t_org: 0, t_ano: 0, t_res: 0, t_tot: 0,
-          grand_total: 0
-      };
+      // Loop Data & Accumulate
+      const totals = { k_o:0, k_a:0, k_r:0, k_t:0, p_o:0, p_a:0, p_r:0, p_t:0, m_o:0, m_a:0, m_r:0, m_t:0, t_o:0, t_a:0, t_r:0, t_t:0, grand:0 };
 
       for (let d = 1; d <= daysInMonth; d++) {
         const r = reportData[d];
-        
-        // Hitung Horizontal (Harian)
-        const k_tot = r['Area Kantor'].organik + r['Area Kantor'].anorganik + r['Area Kantor'].residu;
-        const p_tot = r['Area Parkir'].organik + r['Area Parkir'].anorganik + r['Area Parkir'].residu;
-        const m_tot = r['Area Makan'].organik + r['Area Makan'].anorganik + r['Area Makan'].residu;
-        const t_tot = r['Area Ruang Tunggu'].organik + r['Area Ruang Tunggu'].anorganik + r['Area Ruang Tunggu'].residu;
-        
-        const dailyTotal = k_tot + p_tot + m_tot + t_tot;
+        const kt = r['Area Kantor'].organik + r['Area Kantor'].anorganik + r['Area Kantor'].residu;
+        const pt = r['Area Parkir'].organik + r['Area Parkir'].anorganik + r['Area Parkir'].residu;
+        const mt = r['Area Makan'].organik + r['Area Makan'].anorganik + r['Area Makan'].residu;
+        const tt = r['Area Ruang Tunggu'].organik + r['Area Ruang Tunggu'].anorganik + r['Area Ruang Tunggu'].residu;
+        const dt = kt + pt + mt + tt;
 
-        // Tambahkan ke Akumulator Vertikal
-        colTotals.k_org += r['Area Kantor'].organik; colTotals.k_ano += r['Area Kantor'].anorganik; colTotals.k_res += r['Area Kantor'].residu; colTotals.k_tot += k_tot;
-        colTotals.p_org += r['Area Parkir'].organik; colTotals.p_ano += r['Area Parkir'].anorganik; colTotals.p_res += r['Area Parkir'].residu; colTotals.p_tot += p_tot;
-        colTotals.m_org += r['Area Makan'].organik; colTotals.m_ano += r['Area Makan'].anorganik; colTotals.m_res += r['Area Makan'].residu; colTotals.m_tot += m_tot;
-        colTotals.t_org += r['Area Ruang Tunggu'].organik; colTotals.t_ano += r['Area Ruang Tunggu'].anorganik; colTotals.t_res += r['Area Ruang Tunggu'].residu; colTotals.t_tot += t_tot;
-        colTotals.grand_total += dailyTotal;
+        totals.k_o+=r['Area Kantor'].organik; totals.k_a+=r['Area Kantor'].anorganik; totals.k_r+=r['Area Kantor'].residu; totals.k_t+=kt;
+        totals.p_o+=r['Area Parkir'].organik; totals.p_a+=r['Area Parkir'].anorganik; totals.p_r+=r['Area Parkir'].residu; totals.p_t+=pt;
+        totals.m_o+=r['Area Makan'].organik; totals.m_a+=r['Area Makan'].anorganik; totals.m_r+=r['Area Makan'].residu; totals.m_t+=mt;
+        totals.t_o+=r['Area Ruang Tunggu'].organik; totals.t_a+=r['Area Ruang Tunggu'].anorganik; totals.t_r+=r['Area Ruang Tunggu'].residu; totals.t_t+=tt;
+        totals.grand += dt;
 
-        const row = [
-            { text: d.toString(), style: 'tableCell' },
-            { text: d.toString(), style: 'tableCell' },
-            // Kantor
-            { text: r['Area Kantor'].organik || '-', style: 'tableCell' },
-            { text: r['Area Kantor'].anorganik || '-', style: 'tableCell' },
-            { text: r['Area Kantor'].residu || '-', style: 'tableCell' },
-            { text: k_tot || '-', style: 'tableBold' },
-            // Parkir
-            { text: r['Area Parkir'].organik || '-', style: 'tableCell' },
-            { text: r['Area Parkir'].anorganik || '-', style: 'tableCell' },
-            { text: r['Area Parkir'].residu || '-', style: 'tableCell' },
-            { text: p_tot || '-', style: 'tableBold' },
-            // Makan
-            { text: r['Area Makan'].organik || '-', style: 'tableCell' },
-            { text: r['Area Makan'].anorganik || '-', style: 'tableCell' },
-            { text: r['Area Makan'].residu || '-', style: 'tableCell' },
-            { text: m_tot || '-', style: 'tableBold' },
-            // Tunggu
-            { text: r['Area Ruang Tunggu'].organik || '-', style: 'tableCell' },
-            { text: r['Area Ruang Tunggu'].anorganik || '-', style: 'tableCell' },
-            { text: r['Area Ruang Tunggu'].residu || '-', style: 'tableCell' },
-            { text: t_tot || '-', style: 'tableBold' },
-            // TOTAL HARIAN
-            { text: dailyTotal.toFixed(2), style: 'tableBold' }
-        ];
-        body.push(row);
+        body.push([
+            { text: d.toString(), style: 'tableCell' }, { text: d.toString(), style: 'tableCell' },
+            { text: r['Area Kantor'].organik||'-', style:'tableCell' }, { text: r['Area Kantor'].anorganik||'-', style:'tableCell' }, { text: r['Area Kantor'].residu||'-', style:'tableCell' }, { text: kt||'-', style:'tableBold' },
+            { text: r['Area Parkir'].organik||'-', style:'tableCell' }, { text: r['Area Parkir'].anorganik||'-', style:'tableCell' }, { text: r['Area Parkir'].residu||'-', style:'tableCell' }, { text: pt||'-', style:'tableBold' },
+            { text: r['Area Makan'].organik||'-', style:'tableCell' }, { text: r['Area Makan'].anorganik||'-', style:'tableCell' }, { text: r['Area Makan'].residu||'-', style:'tableCell' }, { text: mt||'-', style:'tableBold' },
+            { text: r['Area Ruang Tunggu'].organik||'-', style:'tableCell' }, { text: r['Area Ruang Tunggu'].anorganik||'-', style:'tableCell' }, { text: r['Area Ruang Tunggu'].residu||'-', style:'tableCell' }, { text: tt||'-', style:'tableBold' },
+            { text: dt.toFixed(2), style: 'tableBold' }
+        ]);
       }
 
-      // --- BARIS TOTAL BULANAN (BAWAH) ---
-      const totalRow = [
-          { text: 'TOTAL BULANAN', colSpan: 2, style: 'tableHeader', alignment: 'center' }, {},
-          
-          // Kantor
-          { text: colTotals.k_org.toFixed(2), style: 'tableBold' },
-          { text: colTotals.k_ano.toFixed(2), style: 'tableBold' },
-          { text: colTotals.k_res.toFixed(2), style: 'tableBold' },
-          { text: colTotals.k_tot.toFixed(2), style: 'tableBold' },
-          
-          // Parkir
-          { text: colTotals.p_org.toFixed(2), style: 'tableBold' },
-          { text: colTotals.p_ano.toFixed(2), style: 'tableBold' },
-          { text: colTotals.p_res.toFixed(2), style: 'tableBold' },
-          { text: colTotals.p_tot.toFixed(2), style: 'tableBold' },
-
-          // Makan
-          { text: colTotals.m_org.toFixed(2), style: 'tableBold' },
-          { text: colTotals.m_ano.toFixed(2), style: 'tableBold' },
-          { text: colTotals.m_res.toFixed(2), style: 'tableBold' },
-          { text: colTotals.m_tot.toFixed(2), style: 'tableBold' },
-
-          // Tunggu
-          { text: colTotals.t_org.toFixed(2), style: 'tableBold' },
-          { text: colTotals.t_ano.toFixed(2), style: 'tableBold' },
-          { text: colTotals.t_res.toFixed(2), style: 'tableBold' },
-          { text: colTotals.t_tot.toFixed(2), style: 'tableBold' },
-
-          // GRAND TOTAL
-          { text: colTotals.grand_total.toFixed(2), style: 'tableHeader' }
-      ];
-      body.push(totalRow);
-
-      const totalTonRow = [
-          { text: 'Total/jenis (ton/bulan)', colSpan: 2, style: 'tableHeader', alignment: 'left', fillColor: '#ffccbc' }, {},
-          
-          // Bagi setiap nilai dengan 1000
-          { text: (colTotals.k_org / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-          { text: (colTotals.k_ano / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-          { text: (colTotals.k_res / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-          { text: (colTotals.k_tot / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-          
-          { text: (colTotals.p_org / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-          { text: (colTotals.p_ano / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-          { text: (colTotals.p_res / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-          { text: (colTotals.p_tot / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-
-          { text: (colTotals.m_org / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-          { text: (colTotals.m_ano / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-          { text: (colTotals.m_res / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-          { text: (colTotals.m_tot / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-
-          { text: (colTotals.t_org / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-          { text: (colTotals.t_ano / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-          { text: (colTotals.t_res / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-          { text: (colTotals.t_tot / 1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
-
-          { text: (colTotals.grand_total / 1000).toFixed(3), style: 'tableHeader', fillColor: '#ffccbc' }
-      ];
-      body.push(totalTonRow);
-
-      // --- 3. BARIS RATA-RATA HARIAN (BARU) ---
-      const avgRow = [
-          { text: 'Rata-rata perhari (kg/hari)', colSpan: 2, style: 'tableHeader', alignment: 'left', fillColor: '#ffe0b2' }, {},
-          
-          // Bagi setiap nilai dengan daysInMonth
-          { text: (colTotals.k_org / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-          { text: (colTotals.k_ano / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-          { text: (colTotals.k_res / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-          { text: (colTotals.k_tot / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-          
-          { text: (colTotals.p_org / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-          { text: (colTotals.p_ano / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-          { text: (colTotals.p_res / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-          { text: (colTotals.p_tot / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-
-          { text: (colTotals.m_org / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-          { text: (colTotals.m_ano / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-          { text: (colTotals.m_res / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-          { text: (colTotals.m_tot / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-
-          { text: (colTotals.t_org / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-          { text: (colTotals.t_ano / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-          { text: (colTotals.t_res / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-          { text: (colTotals.t_tot / daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
-
-          { text: (colTotals.grand_total / daysInMonth).toFixed(2), style: 'tableHeader', fillColor: '#ffe0b2' }
-      ];
-      body.push(avgRow);
+      // Footer (Kg)
+      body.push([
+          { text: 'Total (kg)', colSpan: 2, style: 'tableHeader', alignment:'left', fillColor: '#ffe0b2' }, {},
+          { text: totals.k_o.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: totals.k_a.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: totals.k_r.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: totals.k_t.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
+          { text: totals.p_o.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: totals.p_a.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: totals.p_r.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: totals.p_t.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
+          { text: totals.m_o.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: totals.m_a.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: totals.m_r.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: totals.m_t.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
+          { text: totals.t_o.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: totals.t_a.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: totals.t_r.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: totals.t_t.toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
+          { text: totals.grand.toFixed(2), style: 'tableHeader', fillColor: '#ffe0b2' }
+      ]);
+      // Footer (Ton)
+      body.push([
+          { text: 'Total (ton)', colSpan: 2, style: 'tableHeader', alignment:'left', fillColor: '#ffccbc' }, {},
+          { text: (totals.k_o/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' }, { text: (totals.k_a/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' }, { text: (totals.k_r/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' }, { text: (totals.k_t/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
+          { text: (totals.p_o/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' }, { text: (totals.p_a/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' }, { text: (totals.p_r/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' }, { text: (totals.p_t/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
+          { text: (totals.m_o/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' }, { text: (totals.m_a/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' }, { text: (totals.m_r/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' }, { text: (totals.m_t/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
+          { text: (totals.t_o/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' }, { text: (totals.t_a/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' }, { text: (totals.t_r/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' }, { text: (totals.t_t/1000).toFixed(3), style: 'tableBold', fillColor: '#ffccbc' },
+          { text: (totals.grand/1000).toFixed(3), style: 'tableHeader', fillColor: '#ffccbc' }
+      ]);
+      // Footer (Avg)
+      body.push([
+          { text: 'Rata-rata (kg/hari)', colSpan: 2, style: 'tableHeader', alignment:'left', fillColor: '#ffe0b2' }, {},
+          { text: (totals.k_o/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: (totals.k_a/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: (totals.k_r/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: (totals.k_t/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
+          { text: (totals.p_o/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: (totals.p_a/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: (totals.p_r/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: (totals.p_t/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
+          { text: (totals.m_o/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: (totals.m_a/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: (totals.m_r/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: (totals.m_t/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
+          { text: (totals.t_o/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: (totals.t_a/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: (totals.t_r/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' }, { text: (totals.t_t/daysInMonth).toFixed(2), style: 'tableBold', fillColor: '#ffe0b2' },
+          { text: (totals.grand/daysInMonth).toFixed(2), style: 'tableHeader', fillColor: '#ffe0b2' }
+      ]);
 
       const docDefinition = {
         pageOrientation: 'landscape',
@@ -310,71 +212,47 @@ function StatsBulanan() {
           {
             style: 'tableExample',
             table: {
-              headerRows: 3, // 3 Baris Header agar berulang di halaman baru
+              headerRows: 3,
               widths: [15, 15,  22,22,22,25,  22,22,22,25,  22,22,22,25,  22,22,22,25, 35],
               body: body
             },
-            layout: {
-                fillColor: function (rowIndex, node, columnIndex) {
-                    return (rowIndex < 3 || rowIndex === body.length - 1) ? '#f1c40f' : null; // Kuning untuk Header & Footer
-                }
-            }
+            layout: { fillColor: function (rowIndex) { return (rowIndex < 3 || rowIndex >= body.length - 3) ? '#f1c40f' : null; } }
           }
         ],
         styles: {
           header: { fontSize: 14, bold: true, margin: [0, 0, 0, 5], alignment: 'center' },
           subheader: { fontSize: 10, margin: [0, 0, 0, 10], alignment: 'center' },
-          tableHeader: { bold: true, fontSize: 6, color: 'black', alignment: 'center' }, // Font diperkecil
+          tableHeader: { bold: true, fontSize: 6, color: 'black', alignment: 'center' },
           tableCell: { fontSize: 6, alignment: 'center' },
           tableBold: { fontSize: 6, bold: true, alignment: 'center' }
         }
       };
 
-      window.pdfMake.createPdf(docDefinition).download(`Laporan_Bulanan_${selectedMonth}-${selectedYear}.pdf`);
+      window.pdfMake.createPdf(docDefinition).download(`Laporan Timbulan Sampah Bulan ${selectedMonth}-${selectedYear}.pdf`);
 
-    } catch (error) {
-      console.error('Error export PDF:', error);
-      alert('Gagal membuat PDF');
-    } finally {
-      setIsExporting(false);
-    }
+    } catch (error) { console.error(error); alert('Gagal membuat PDF'); } finally { setIsExporting(false); }
   };
 
   const handleExportXLSX = async () => {
     setIsExporting(true);
     setErrorMessage('');
     const token = localStorage.getItem('adminToken');
-
     try {
       const response = await axios.get('https://proyek-pencatatan-sampah.vercel.app/api/export/monthly', {
         headers: { 'Authorization': `Bearer ${token}` },
         params: { month: selectedMonth, year: selectedYear },
         responseType: 'blob', 
       });
-
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      
-      let filename = `laporan_bulanan_${selectedMonth}-${selectedYear}.xlsx`; 
-      const contentDisposition = response.headers['content-disposition'];
-      if (contentDisposition) {
-          const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
-          if (filenameMatch && filenameMatch.length === 2) filename = filenameMatch[1];
-      }
-
+      let filename = `Laporan Timbulan Sampah Bulan ${selectedMonth}-${selectedYear}.xlsx`;
       link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
       link.parentNode.removeChild(link);
       window.URL.revokeObjectURL(url);
-
-    } catch (error) {
-      console.error('Error exporting XLSX:', error);
-      setErrorMessage('Gagal mengekspor Excel.');
-    } finally {
-      setIsExporting(false);
-    }
+    } catch (error) { console.error(error); setErrorMessage('Gagal mengekspor Excel.'); } finally { setIsExporting(false); }
   };
 
   return (
@@ -417,7 +295,6 @@ function StatsBulanan() {
         <div style={styles.previewContainer}>
           <div style={styles.tableHeaderContainer}>
             <h3 style={styles.previewTitle}>Data Mentah (Bulan Ini)</h3>
-            
             <div style={{ display: 'flex', gap: '10px' }}>
                 <button onClick={handleExportXLSX} style={styles.exportButtonXLSX} disabled={isExporting}>
                 {isExporting ? '...' : 'Ekspor Excel'}
@@ -426,12 +303,13 @@ function StatsBulanan() {
                 {isExporting ? '...' : 'Ekspor PDF'}
                 </button>
             </div>
-
           </div>
           <div style={styles.tableWrapper}>
             <table style={styles.table}>
               <thead>
                 <tr>
+                  {/* KOLOM NO */}
+                  <th style={{...styles.th, width:'50px', textAlign:'center'}}>No</th>
                   <th style={styles.th}>Area</th>
                   <th style={styles.th}>Nama Item</th>
                   <th style={styles.th}>Pengelola</th>
@@ -445,6 +323,8 @@ function StatsBulanan() {
                 {tableData.length > 0 ? (
                   tableData.map((row, index) => (
                     <tr key={index}>
+                      {/* ISI NO */}
+                      <td style={{...styles.td, textAlign:'center'}}>{index + 1}</td>
                       <td style={styles.td}>{row.area_label}</td>
                       <td style={styles.td}>{row.item_label}</td>
                       <td style={styles.td}>{row.pengelola}</td>
@@ -456,7 +336,8 @@ function StatsBulanan() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="7" style={{ ...styles.td, textAlign: 'center' }}>Tidak ada data mentah.</td>
+                    {/* Colspan 8 */}
+                    <td colSpan="8" style={{ ...styles.td, textAlign: 'center' }}>Tidak ada data mentah.</td>
                   </tr>
                 )}
               </tbody>
