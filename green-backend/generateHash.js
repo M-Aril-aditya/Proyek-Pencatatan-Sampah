@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
 
 // GANTI '12345' DI BAWAH INI JIKA INGIN PASSWORD LAIN
-const passwordPilihan = '12345'; 
+const passwordPilihan = '@dexazerowaste2030'; 
 
 async function buatHash() {
     const salt = await bcrypt.genSalt(10);
