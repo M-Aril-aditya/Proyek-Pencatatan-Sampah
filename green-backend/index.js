@@ -588,6 +588,67 @@ app.get('/api/export/yearly', async (req, res) => {
     }
 });
 
+// --- API MANAJEMEN PETUGAS (Baru) ---
+
+// 1. Ambil Daftar Petugas
+app.get('/api/petugas', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT id, username FROM petugas ORDER BY id DESC');
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ message: 'Gagal mengambil data petugas' });
+    }
+});
+
+// 2. Tambah Petugas Baru
+app.post('/api/petugas', async (req, res) => {
+    const { username, password } = req.body;
+    try {
+        // Cek username kembar
+        const cek = await pool.query('SELECT * FROM petugas WHERE username = $1', [username]);
+        if (cek.rows.length > 0) return res.status(400).json({ message: 'Username sudah ada!' });
+
+        // Simpan (Password plain text dulu agar mudah, atau hash jika mau aman)
+        // Untuk kecepatan H-1, kita simpan plain text atau hash sederhana
+        const newUser = await pool.query(
+            'INSERT INTO petugas (username, password) VALUES ($1, $2) RETURNING *',
+            [username, password]
+        );
+        res.json({ message: 'Petugas berhasil dibuat', petugas: newUser.rows[0] });
+    } catch (err) {
+        res.status(500).json({ message: 'Gagal menambah petugas' });
+    }
+});
+
+// 3. Hapus Petugas
+app.delete('/api/petugas/:id', async (req, res) => {
+    try {
+        await pool.query('DELETE FROM petugas WHERE id = $1', [req.params.id]);
+        res.json({ message: 'Petugas dihapus' });
+    } catch (err) {
+        res.status(500).json({ message: 'Gagal menghapus' });
+    }
+});
+
+// 4. LOGIN KHUSUS PETUGAS
+app.post('/api/login-petugas', async (req, res) => {
+    const { username, password } = req.body;
+    try {
+        const result = await pool.query('SELECT * FROM petugas WHERE username = $1', [username]);
+        if (result.rows.length === 0) return res.status(404).json({ message: 'Petugas tidak ditemukan' });
+
+        const petugas = result.rows[0];
+        // Cek password (langsung string compare karena dibuat admin)
+        if (password !== petugas.password) {
+            return res.status(401).json({ message: 'Password salah' });
+        }
+
+        res.json({ message: 'Login Berhasil', role: 'petugas', username: petugas.username });
+    } catch (err) {
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
 // --- EXPORT APP (VERCEL) ---
 if (require.main === module) {
     app.listen(PORT, () => console.log(`Server berjalan di http://localhost:${PORT}`));
