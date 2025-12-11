@@ -1,6 +1,6 @@
 require('dotenv').config(); // Untuk testing lokal
 const express = require('express');
-const cors = require('cors');
+const cors = require('cors'); // Wajib ada untuk izin akses browser
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -15,27 +15,28 @@ const PORT = process.env.PORT || 5000;
 // --- 1. KONEKSI DATABASE (NEON / CLOUD) ---
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // Wajib untuk Neon
+  ssl: { rejectUnauthorized: false } // Wajib untuk Neon Database
 });
 
 // --- 2. CONFIG MULTER (MEMORY STORAGE) ---
-// Vercel tidak punya disk, file disimpan di RAM sementara
+// Vercel tidak punya disk fisik, file disimpan di RAM sementara
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
-
-app.use(cors({
-    origin: '*',
-    methods: "GET,POST,DELETE",
-    optionsSuccessStatus: 200
-}));
+const PdfPrinter = require('pdfmake');
+const path = require('path');
+// --- 3. MIDDLEWARE (PENTING) ---
+// Gunakan CORS paling sederhana agar semua device (Laptop/HP) diizinkan masuk
+app.use(cors()); 
 app.use(express.json());
 
-// Cek Status
+// --- 4. ROUTES UTAMA ---
+
+// Cek Status Server
 app.get('/', (req, res) => {
     res.send('Green Backend is Running on Vercel!');
 });
 
-// --- LOGIN ---
+// --- A. LOGIN ADMIN (WEB DASHBOARD) ---
 app.post('/api/login', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -45,6 +46,7 @@ app.post('/api/login', async (req, res) => {
     
     const admin = userQuery.rows[0];
     const isMatch = await bcrypt.compare(password, admin.password_hash);
+    
     if (!isMatch) return res.status(401).json({ message: 'Password salah' });
     
     const token = jwt.sign({ id: admin.id, username: admin.username }, process.env.JWT_SECRET || 'rahasia', { expiresIn: '1d' });
@@ -55,7 +57,70 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// --- UPLOAD (VERCEL MODE + REALTIME TIMESTAMP) ---
+// --- B. LOGIN PETUGAS (MOBILE APP) ---
+app.post('/api/login-petugas', async (req, res) => {
+    const { username, password } = req.body;
+    try {
+        const result = await pool.query('SELECT * FROM petugas WHERE username = $1', [username]);
+        if (result.rows.length === 0) return res.status(404).json({ message: 'Petugas tidak ditemukan' });
+
+        const petugas = result.rows[0];
+        // Cek password (Plain text sesuai request Anda untuk kemudahan)
+        if (password !== petugas.password) {
+            return res.status(401).json({ message: 'Password salah' });
+        }
+
+        res.json({ message: 'Login Berhasil', role: 'petugas', username: petugas.username });
+    } catch (err) {
+        console.error('Error login petugas:', err);
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
+// --- C. MANAJEMEN PETUGAS (CRUD) ---
+
+// 1. Ambil Daftar Petugas
+app.get('/api/petugas', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT id, username FROM petugas ORDER BY id DESC');
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ message: 'Gagal mengambil data petugas' });
+    }
+});
+
+// 2. Tambah Petugas Baru
+app.post('/api/petugas', async (req, res) => {
+    const { username, password } = req.body;
+    try {
+        // Cek username kembar
+        const cek = await pool.query('SELECT * FROM petugas WHERE username = $1', [username]);
+        if (cek.rows.length > 0) return res.status(400).json({ message: 'Username sudah ada!' });
+
+        const newUser = await pool.query(
+            'INSERT INTO petugas (username, password) VALUES ($1, $2) RETURNING *',
+            [username, password]
+        );
+        res.json({ message: 'Petugas berhasil dibuat', petugas: newUser.rows[0] });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Gagal menambah petugas' });
+    }
+});
+
+// 3. Hapus Petugas
+app.delete('/api/petugas/:id', async (req, res) => {
+    try {
+        await pool.query('DELETE FROM petugas WHERE id = $1', [req.params.id]);
+        res.json({ message: 'Petugas dihapus' });
+    } catch (err) {
+        res.status(500).json({ message: 'Gagal menghapus' });
+    }
+});
+
+
+// --- D. UPLOAD CSV (VERCEL STREAM MODE) ---
+// --- D. UPLOAD CSV (DENGAN FITUR BACKDATING / WAKTU MUNDUR) ---
 app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
   if (!req.files || req.files.length === 0) return res.status(400).json({ message: 'Tidak ada file.' });
 
@@ -66,22 +131,32 @@ app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
       // Baca dari BUFFER (RAM)
       Readable.from(file.buffer)
         .pipe(csv({
-            mapHeaders: ({ header }) => header.trim().replace(/^\uFEFF/, '') // Fix BOM (karakter hantu)
+            mapHeaders: ({ header }) => header.trim().replace(/^\uFEFF/, '') // Fix BOM & Spasi
         }))
         .on('data', (data) => rowData.push(data))
         .on('error', (err) => reject(err))
         .on('end', async () => {
             if (rowData.length === 0) return resolve({ status: 'error', file: file.originalname, reason: 'File kosong' });
             
-            // Gunakan pool.connect untuk transaksi
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
                 for (const row of rowData) {
                     
-                    // --- PERBAIKAN WAKTU: GUNAKAN WAKTU SERVER SAAT INI ---
-                    let recordedAt = new Date(); 
-                    // ------------------------------------------------------
+                    // --- LOGIKA WAKTU (BARU) ---
+                    let recordedAt = new Date(); // Default: Waktu Detik Ini (Jika kolom Tanggal kosong)
+
+                    // Cek apakah di CSV ada kolom 'Tanggal', 'Waktu', atau 'Date'
+                    const csvDateString = row['Tanggal'] || row['Waktu'] || row['Date'];
+
+                    if (csvDateString) {
+                        const parsedDate = new Date(csvDateString);
+                        // Cek apakah format tanggal valid?
+                        if (!isNaN(parsedDate.getTime())) {
+                            recordedAt = parsedDate; // GUNAKAN WAKTU DARI CSV
+                        }
+                    }
+                    // ---------------------------
 
                     const queryText = `
                         INSERT INTO waste_records 
@@ -110,21 +185,20 @@ app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
   try {
     const promises = req.files.map(file => processFile(file));
     await Promise.all(promises);
-    res.json({ message: 'Upload berhasil. Data disimpan sesuai waktu upload.' });
+    res.json({ message: 'Upload berhasil. Waktu disesuaikan dengan isi file.' });
   } catch (err) {
     console.error('System Error:', err);
     res.status(500).json({ message: 'Terjadi kesalahan sistem.' });
   }
 });
 
-// --- HELPER TANGGAL (Asia/Jakarta) ---
+// --- HELPER TANGGAL (Asia/Jakarta Logic) ---
 function getSQLDateCondition(range, year, month, week, specificDate) {
-  const jsDate = new Date(); 
   const local_timestamp = "recorded_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta'";
+  const jsDate = new Date();
+  
   const targetYear = year ? parseInt(year) : jsDate.getFullYear();
   const targetMonth = month ? parseInt(month) : jsDate.getMonth() + 1; 
-  
-  // Pastikan bulan 2 digit
   const tm = targetMonth.toString().padStart(2, '0');
   
   const dayOfMonth = jsDate.getDate();
@@ -134,7 +208,6 @@ function getSQLDateCondition(range, year, month, week, specificDate) {
   else if (dayOfMonth >= 22) currentWeekOfMonth = 4;
   const targetWeek = week ? parseInt(week) : currentWeekOfMonth;
 
-  // Format Hari Ini (YYYY-MM-DD)
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
 
   let dateCondition = '';
@@ -169,7 +242,7 @@ function getSQLDateCondition(range, year, month, week, specificDate) {
   return dateCondition;
 }
 
-// --- STATISTIK (3 KATEGORI) ---
+// --- E. STATISTIK & RECORDS ---
 app.get('/api/stats', async (req, res) => {
   const { range, year, month, week, date } = req.query;
   try {
@@ -193,7 +266,6 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
-// --- RECORDS ---
 app.get('/api/records', async (req, res) => {
   const { range, year, month, week, date } = req.query;
   try {
@@ -209,7 +281,7 @@ app.get('/api/records', async (req, res) => {
   }
 });
 
-// --- HAPUS DATA ---
+// --- F. HAPUS SEMUA DATA ---
 app.delete('/api/clear-data', async (req, res) => {
     try {
         await pool.query('TRUNCATE TABLE waste_records RESTART IDENTITY;');
@@ -217,12 +289,15 @@ app.delete('/api/clear-data', async (req, res) => {
     } catch (err) { res.status(500).json({ message: 'Error delete' }); }
 });
 
-// --- EKSPOR BULANAN (MATRIKS + FOOTER LENGKAP) ---
+// --- G. EKSPOR EXCEL BULANAN (LENGKAP) ---
+// --- G. EKSPOR EXCEL BULANAN (FORMAT DETAIL: JENIS SAMPAH & TOTAL) ---
+// --- G. EKSPOR EXCEL BULANAN (FORMAT DETAIL: JENIS SAMPAH & TOTAL) ---
 app.get('/api/export/monthly', async (req, res) => {
     const targetMonth = req.query.month ? parseInt(req.query.month) : new Date().getMonth() + 1;
     const targetYear = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
 
     try {
+        // 1. Ambil Data
         const { rows } = await pool.query(
             `SELECT * FROM waste_records 
              WHERE EXTRACT(MONTH FROM recorded_at) = $1 AND EXTRACT(YEAR FROM recorded_at) = $2
@@ -230,188 +305,246 @@ app.get('/api/export/monthly', async (req, res) => {
             [targetMonth, targetYear]
         );
 
+        // 2. Konfigurasi Kolom
+        const areaList = ['Area Kantor', 'Area Parkir', 'Area Makan', 'Area Ruang Tunggu'];
+        const structure = {
+            organik: [
+                { header: 'Daun Kering', keywords: ['daun', 'kering'] },
+                { header: 'Sisa Makanan', keywords: ['makan', 'sisa'] }
+            ],
+            anorganik: [
+                { header: 'Kertas', keywords: ['kertas'] },
+                { header: 'Kardus', keywords: ['kardus'] },
+                { header: 'Plastik', keywords: ['plastik'] },
+                { header: 'Duplex', keywords: ['duplex'] },
+                { header: 'Kantong', keywords: ['kantong', 'kresek'] }
+            ],
+            residu: [
+                { header: 'Vial', keywords: ['vial'] },
+                { header: 'Botol', keywords: ['botol'] },
+                { header: 'Drum Vat', keywords: ['drum', 'vat'] },
+                { header: 'Residu', keywords: ['residu', 'lain'] }
+            ]
+        };
+
+        // 3. Proses Data
         const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
         const reportData = {};
 
         for (let d = 1; d <= daysInMonth; d++) {
-            reportData[d] = {
-                'Area Kantor': { organik: 0, anorganik: 0, residu: 0 },
-                'Area Parkir': { organik: 0, anorganik: 0, residu: 0 },
-                'Area Makan': { organik: 0, anorganik: 0, residu: 0 },
-                'Area Ruang Tunggu': { organik: 0, anorganik: 0, residu: 0 },
-            };
+            reportData[d] = {};
+            areaList.forEach(area => {
+                reportData[d][area] = {};
+                [...structure.organik, ...structure.anorganik, ...structure.residu].forEach(item => {
+                    reportData[d][area][item.header] = 0;
+                });
+            });
         }
 
         rows.forEach(row => {
-            const dateObj = new Date(row.recorded_at);
-            const day = dateObj.getDate();
-            let area = row.area_label ? row.area_label.trim() : '';
-            const status = row.status ? row.status.trim() : '';
+            const day = new Date(row.recorded_at).getDate();
+            const dbArea = row.area_label ? row.area_label.toLowerCase() : '';
+            const dbItem = row.item_label ? row.item_label.toLowerCase() : '';
             const weight = parseFloat(row.weight_kg) || 0;
 
-            let targetAreaKey = null;
-            if (area.toLowerCase().includes('kantor')) targetAreaKey = 'Area Kantor';
-            else if (area.toLowerCase().includes('parkir')) targetAreaKey = 'Area Parkir';
-            else if (area.toLowerCase().includes('makan')) targetAreaKey = 'Area Makan';
-            else if (area.toLowerCase().includes('tunggu')) targetAreaKey = 'Area Ruang Tunggu';
+            let targetArea = null;
+            if (dbArea.includes('kantor')) targetArea = 'Area Kantor';
+            else if (dbArea.includes('parkir')) targetArea = 'Area Parkir';
+            else if (dbArea.includes('makan')) targetArea = 'Area Makan';
+            else if (dbArea.includes('tunggu')) targetArea = 'Area Ruang Tunggu';
 
-            if (targetAreaKey && reportData[day]) {
-                if (status === 'Organik Terpilah') reportData[day][targetAreaKey].organik += weight;
-                else if (status === 'Anorganik Terpilah') reportData[day][targetAreaKey].anorganik += weight;
-                else if (status === 'Tidak Terkelola') reportData[day][targetAreaKey].residu += weight;
+            if (targetArea && reportData[day]) {
+                let matched = false;
+                const allItems = [...structure.organik, ...structure.anorganik, ...structure.residu];
+                for (const item of allItems) {
+                    if (item.keywords.some(k => dbItem.includes(k))) {
+                        reportData[day][targetArea][item.header] += weight;
+                        matched = true;
+                        break; 
+                    }
+                }
+                if (!matched) reportData[day][targetArea]['Residu'] += weight; 
             }
         });
 
+        // 4. Buat Excel
         const workbook = new excel.Workbook();
         const worksheet = workbook.addWorksheet(`Laporan ${targetMonth}-${targetYear}`);
 
-        // --- HITUNG TOTAL MANUAL (UNTUK FOOTER) ---
-        const grandTotals = {};
-        // Inisialisasi 0 untuk setiap kolom data (C-S)
-        const columnLetters = ['C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S'];
-        columnLetters.forEach(l => grandTotals[l] = 0);
+        // --- HEADER ---
+        const colsPerArea = 15;
+        const totalCols = 2 + (colsPerArea * areaList.length);
 
-        // --- HEADER & MERGE ---
-        worksheet.mergeCells('A1:R1');
+        // Helper untuk huruf kolom
+        const getColLetter = (n) => {
+            let s = "";
+            while(n >= 0) {
+                s = String.fromCharCode(n % 26 + 65) + s;
+                n = Math.floor(n / 26) - 1;
+            }
+            return s;
+        };
+        const lastColLetter = getColLetter(totalCols - 1);
+
+        worksheet.mergeCells(`A1:${lastColLetter}1`);
         worksheet.getCell('A1').value = `REKAMAN TIMBULAN SAMPAH - BULAN ${targetMonth}/${targetYear}`;
         worksheet.getCell('A1').font = { bold: true, size: 14 };
         worksheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
 
-        worksheet.mergeCells('A3:A5'); worksheet.getCell('A3').value = 'No';
-        worksheet.mergeCells('B3:B5'); worksheet.getCell('B3').value = 'Tanggal';
+        let currentIdx = 3; 
+        
+        worksheet.getCell('A3').value = 'No'; worksheet.mergeCells('A3:A5');
+        worksheet.getCell('B3').value = 'Tanggal'; worksheet.mergeCells('B3:B5');
 
-        worksheet.mergeCells('C3:F3'); worksheet.getCell('C3').value = 'Area Kantor';
-        worksheet.getCell('C4').value = 'Sampah'; worksheet.getCell('D4').value = 'Sampah'; worksheet.getCell('E4').value = 'Sampah'; worksheet.getCell('F4').value = 'Total';
-        worksheet.getCell('C5').value = 'Organik'; worksheet.getCell('D5').value = 'Anorganik'; worksheet.getCell('E5').value = 'Lainnya'; worksheet.getCell('F5').value = '(Kg)';
+        areaList.forEach(area => {
+            const startCol = currentIdx;
+            const endCol = currentIdx + colsPerArea - 1;
+            worksheet.mergeCells(3, startCol, 3, endCol);
+            worksheet.getCell(3, startCol).value = area.toUpperCase();
+            
+            // Baris 4
+            worksheet.mergeCells(4, currentIdx, 4, currentIdx + 1);
+            worksheet.getCell(4, currentIdx).value = 'Organik';
+            worksheet.getCell(4, currentIdx + 2).value = 'Total Organik';
 
-        worksheet.mergeCells('G3:J3'); worksheet.getCell('G3').value = 'Area Parkir';
-        worksheet.getCell('G4').value = 'Sampah'; worksheet.getCell('H4').value = 'Sampah'; worksheet.getCell('I4').value = 'Sampah'; worksheet.getCell('J4').value = 'Total';
-        worksheet.getCell('G5').value = 'Organik'; worksheet.getCell('H5').value = 'Anorganik'; worksheet.getCell('I5').value = 'Lainnya'; worksheet.getCell('J5').value = '(Kg)';
+            const anorgStart = currentIdx + 3;
+            worksheet.mergeCells(4, anorgStart, 4, anorgStart + 4);
+            worksheet.getCell(4, anorgStart).value = 'Anorganik';
+            worksheet.getCell(4, anorgStart + 5).value = 'Total Anorganik';
 
-        worksheet.mergeCells('K3:N3'); worksheet.getCell('K3').value = 'Area Makan';
-        worksheet.getCell('K4').value = 'Sampah'; worksheet.getCell('L4').value = 'Sampah'; worksheet.getCell('M4').value = 'Sampah'; worksheet.getCell('N4').value = 'Total';
-        worksheet.getCell('K5').value = 'Organik'; worksheet.getCell('L5').value = 'Anorganik'; worksheet.getCell('M5').value = 'Lainnya'; worksheet.getCell('N5').value = '(Kg)';
+            worksheet.getCell(4, anorgStart + 6).value = 'Total Terkelola';
 
-        worksheet.mergeCells('O3:R3'); worksheet.getCell('O3').value = 'Area Ruang Tunggu';
-        worksheet.getCell('O4').value = 'Sampah'; worksheet.getCell('P4').value = 'Sampah'; worksheet.getCell('Q4').value = 'Sampah'; worksheet.getCell('R4').value = 'Total';
-        worksheet.getCell('O5').value = 'Organik'; worksheet.getCell('P5').value = 'Anorganik'; worksheet.getCell('Q5').value = 'Lainnya'; worksheet.getCell('R5').value = '(Kg)';
+            const residuStart = anorgStart + 7;
+            worksheet.mergeCells(4, residuStart, 4, residuStart + 3);
+            worksheet.getCell(4, residuStart).value = 'Sampah Tidak Terkelola';
+            worksheet.getCell(4, residuStart + 4).value = 'Total Tidak Terkelola'; 
 
-        worksheet.mergeCells('S3:S5'); worksheet.getCell('S3').value = 'TOTAL HARIAN (Kg)';
+            // Baris 5 (Nama Item)
+            let subIdx = currentIdx;
+            structure.organik.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
+            worksheet.getCell(5, subIdx++).value = '(Kg)'; 
 
-        ['A3', 'B3', 'C3', 'G3', 'K3', 'O3', 'S3'].forEach(cell => {
-            worksheet.getCell(cell).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
-            worksheet.getCell(cell).font = { bold: true };
-            worksheet.getCell(cell).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+            structure.anorganik.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
+            worksheet.getCell(5, subIdx++).value = '(Kg)'; 
+
+            worksheet.getCell(5, subIdx++).value = '(Kg)'; 
+
+            structure.residu.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
+            worksheet.getCell(5, subIdx++).value = '(Kg)'; 
+
+            currentIdx += colsPerArea;
         });
 
-        // --- PENGATURAN LEBAR KOLOM (FIXED) ---
-        worksheet.getColumn(1).width = 5; 
-        worksheet.getColumn(2).width = 30; 
-        for(let i=3; i<=19; i++) {
-            worksheet.getColumn(i).width = 15;
-        }
-
-        for (let r = 4; r <= 5; r++) {
-             worksheet.getRow(r).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-        }
-
-        // Isi Data Harian & Hitung Total Manual
-        for (let d = 1; d <= daysInMonth; d++) {
-            const r = reportData[d];
+        // Styling
+        for (let r = 3; r <= 5; r++) {
+            const row = worksheet.getRow(r);
+            // --- PERBAIKAN TINGGI BARIS HEADER ---
+            row.height = 30; // Biar muat teks 2 baris (wrap text)
             
-            const vals = {
-                'C': r['Area Kantor'].organik, 'D': r['Area Kantor'].anorganik, 'E': r['Area Kantor'].residu,
-                'F': r['Area Kantor'].organik + r['Area Kantor'].anorganik + r['Area Kantor'].residu,
-                'G': r['Area Parkir'].organik, 'H': r['Area Parkir'].anorganik, 'I': r['Area Parkir'].residu,
-                'J': r['Area Parkir'].organik + r['Area Parkir'].anorganik + r['Area Parkir'].residu,
-                'K': r['Area Makan'].organik, 'L': r['Area Makan'].anorganik, 'M': r['Area Makan'].residu,
-                'N': r['Area Makan'].organik + r['Area Makan'].anorganik + r['Area Makan'].residu,
-                'O': r['Area Ruang Tunggu'].organik, 'P': r['Area Ruang Tunggu'].anorganik, 'Q': r['Area Ruang Tunggu'].residu,
-                'R': r['Area Ruang Tunggu'].organik + r['Area Ruang Tunggu'].anorganik + r['Area Ruang Tunggu'].residu,
-            };
-            vals['S'] = vals['F'] + vals['J'] + vals['N'] + vals['R'];
-
-            // Add to Grand Total
-            for(let key in vals) { grandTotals[key] += vals[key]; }
-
-            const row = worksheet.getRow(d + 5);
-            row.values = [
-                d, d,
-                vals['C'], vals['D'], vals['E'], vals['F'],
-                vals['G'], vals['H'], vals['I'], vals['J'],
-                vals['K'], vals['L'], vals['M'], vals['N'],
-                vals['O'], vals['P'], vals['Q'], vals['R'],
-                vals['S']
-            ];
-        }
-
-        // --- FOOTER (Total Kg, Ton, Rata-rata) ---
-        const rowTotalKg = daysInMonth + 6; 
-        worksheet.getCell(`A${rowTotalKg}`).value = 'Total/jenis (kg/bulan)';
-        worksheet.mergeCells(`A${rowTotalKg}:B${rowTotalKg}`);
-        worksheet.getCell(`A${rowTotalKg}`).font = { bold: true };
-        worksheet.getCell(`A${rowTotalKg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } }; 
-
-        for(let col=3; col<=19; col++) {
-            const l = worksheet.getColumn(col).letter;
-            worksheet.getCell(`${l}${rowTotalKg}`).value = grandTotals[l]; // NILAI MANUAL
-            worksheet.getCell(`${l}${rowTotalKg}`).font = { bold: true };
-            worksheet.getCell(`${l}${rowTotalKg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
-        }
-
-        const rowTotalTon = rowTotalKg + 1; 
-        worksheet.getCell(`A${rowTotalTon}`).value = 'Total/jenis (ton/bulan)';
-        worksheet.mergeCells(`A${rowTotalTon}:B${rowTotalTon}`);
-        worksheet.getCell(`A${rowTotalTon}`).font = { bold: true };
-        worksheet.getCell(`A${rowTotalTon}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFCCBC' } }; 
-
-        for(let col=3; col<=19; col++) {
-            const l = worksheet.getColumn(col).letter;
-            worksheet.getCell(`${l}${rowTotalTon}`).value = grandTotals[l] / 1000; // NILAI MANUAL
-            worksheet.getCell(`${l}${rowTotalTon}`).numFmt = '0.000';
-            worksheet.getCell(`${l}${rowTotalTon}`).font = { bold: true };
-            worksheet.getCell(`${l}${rowTotalTon}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFCCBC' } };
-        }
-
-        const rowAvg = rowTotalTon + 1; 
-        worksheet.getCell(`A${rowAvg}`).value = 'Rata-rata perhari (kg/hari)';
-        worksheet.mergeCells(`A${rowAvg}:B${rowAvg}`);
-        worksheet.getCell(`A${rowAvg}`).font = { bold: true };
-        worksheet.getCell(`A${rowAvg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } }; 
-
-        for(let col=3; col<=19; col++) {
-            const l = worksheet.getColumn(col).letter;
-            worksheet.getCell(`${l}${rowAvg}`).value = grandTotals[l] / daysInMonth; // NILAI MANUAL
-            worksheet.getCell(`${l}${rowAvg}`).numFmt = '0.00'; 
-            worksheet.getCell(`${l}${rowAvg}`).font = { bold: true };
-            worksheet.getCell(`${l}${rowAvg}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
-        }
-
-        // Border
-        worksheet.eachRow((row, rowNumber) => {
-            row.eachCell((cell) => {
-                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+            for (let c = 1; c <= totalCols; c++) {
+                const cell = row.getCell(c);
+                cell.font = { bold: true, size: 9 };
                 cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+
+                const colModulo = (c - 2) % colsPerArea; 
+                if (colModulo === 0 && c > 2) { 
+                     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF0000' } }; 
+                     cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; 
+                }
+            }
+        }
+
+        // 5. ISI DATA
+        const grandTotals = new Array(totalCols + 1).fill(0);
+
+        for (let d = 1; d <= daysInMonth; d++) {
+            const rowValues = [d, d];
+            
+            areaList.forEach(area => {
+                const r = reportData[d][area];
+                let sumOrganik = 0;
+                structure.organik.forEach(i => sumOrganik += (r[i.header] || 0));
+                let sumAnorganik = 0;
+                structure.anorganik.forEach(i => sumAnorganik += (r[i.header] || 0));
+                let sumResidu = 0;
+                structure.residu.forEach(i => sumResidu += (r[i.header] || 0));
+                const totalTerkelola = sumOrganik + sumAnorganik;
+
+                structure.organik.forEach(i => rowValues.push(r[i.header] || '-'));
+                rowValues.push(sumOrganik || '-');
+                structure.anorganik.forEach(i => rowValues.push(r[i.header] || '-'));
+                rowValues.push(sumAnorganik || '-');
+                rowValues.push(totalTerkelola || '-');
+                structure.residu.forEach(i => rowValues.push(r[i.header] || '-'));
+                rowValues.push(sumResidu || '-');
+            });
+
+            const excelRow = worksheet.getRow(d + 5);
+            excelRow.values = rowValues;
+            excelRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+                cell.alignment = { horizontal: 'center' };
+                const val = cell.value;
+                if (typeof val === 'number') {
+                    grandTotals[colNumber] = (grandTotals[colNumber] || 0) + val;
+                }
+            });
+        }
+
+        // 6. FOOTER
+        const rowTotalKg = daysInMonth + 6;
+        const rowTotalTon = rowTotalKg + 1;
+        const rowAvg = rowTotalKg + 2;
+
+        worksheet.getCell(`A${rowTotalKg}`).value = 'Total (kg/bln)';
+        worksheet.getCell(`A${rowTotalTon}`).value = 'Total (ton/bln)';
+        worksheet.getCell(`A${rowAvg}`).value = 'Rata-rata (kg/hari)';
+
+        for (let c = 3; c <= totalCols; c++) {
+            const totalVal = grandTotals[c] || 0;
+            worksheet.getCell(rowTotalKg, c).value = totalVal;
+            worksheet.getCell(rowTotalTon, c).value = (totalVal / 1000);
+            worksheet.getCell(rowTotalTon, c).numFmt = '0.000';
+            worksheet.getCell(rowAvg, c).value = (totalVal / daysInMonth);
+            worksheet.getCell(rowAvg, c).numFmt = '0.00';
+        }
+
+        [rowTotalKg, rowTotalTon, rowAvg].forEach(r => {
+            const row = worksheet.getRow(r);
+            row.eachCell({ includeEmpty: true }, (cell) => {
+                cell.font = { bold: true };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
+                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
             });
         });
 
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename=Laporan_Lengkap_${targetMonth}-${targetYear}.xlsx`);
+        // --- PERBAIKAN LEBAR KOLOM (AGAR MUAT) ---
+        worksheet.getColumn(1).width = 5;  // No
+        worksheet.getColumn(2).width = 8;  // Tanggal
+        for(let i=3; i<=totalCols; i++) {
+            worksheet.getColumn(i).width = 17; // LEBARKAN JADI 17 (Dulu 12)
+        }
 
+        // Kirim
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename=Laporan Timbulan Sampah Bulan${targetMonth}-${targetYear}.xlsx`);
         await workbook.xlsx.write(res);
         res.end();
 
     } catch (err) {
-        console.error('Error saat ekspor Excel:', err.message);
-        res.status(500).json({ message: 'Gagal membuat file Excel.' });
+        console.error('Error Excel:', err);
+        res.status(500).json({ message: 'Gagal export excel' });
     }
 });
 
-// --- RUTE EKSPOR TAHUNAN (FIX WIDTH & TOTAL) ---
+// --- H. EKSPOR EXCEL TAHUNAN (FORMAT DETAIL: JENIS SAMPAH & TOTAL) ---
 app.get('/api/export/yearly', async (req, res) => {
     const targetYear = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
 
     try {
+        // 1. Ambil Data Setahun Penuh
         const { rows } = await pool.query(
             `SELECT * FROM waste_records 
              WHERE EXTRACT(YEAR FROM recorded_at) = $1
@@ -419,238 +552,413 @@ app.get('/api/export/yearly', async (req, res) => {
             [targetYear]
         );
 
-        const reportData = {};
+        // 2. Konfigurasi Kolom (Sama persis dengan Bulanan)
+        const areaList = ['Area Kantor', 'Area Parkir', 'Area Makan', 'Area Ruang Tunggu'];
+        const structure = {
+            organik: [
+                { header: 'Daun Kering', keywords: ['daun', 'kering'] },
+                { header: 'Sisa Makanan', keywords: ['makan', 'sisa'] }
+            ],
+            anorganik: [
+                { header: 'Kertas', keywords: ['kertas'] },
+                { header: 'Kardus', keywords: ['kardus'] },
+                { header: 'Plastik', keywords: ['plastik'] },
+                { header: 'Duplex', keywords: ['duplex'] },
+                { header: 'Kantong', keywords: ['kantong', 'kresek'] }
+            ],
+            residu: [
+                { header: 'Vial', keywords: ['vial'] },
+                { header: 'Botol', keywords: ['botol'] },
+                { header: 'Drum Vat', keywords: ['drum', 'vat'] },
+                { header: 'Residu', keywords: ['residu', 'lain'] }
+            ]
+        };
+
         const monthNames = [
-            'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 
+            'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
             'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
         ];
 
+        // 3. Proses Data (Kelompokkan per Bulan 0-11)
+        const reportData = {};
         for (let m = 0; m < 12; m++) {
-            reportData[m] = {
-                'Area Kantor': { organik: 0, anorganik: 0, residu: 0 },
-                'Area Parkir': { organik: 0, anorganik: 0, residu: 0 },
-                'Area Makan': { organik: 0, anorganik: 0, residu: 0 },
-                'Area Ruang Tunggu': { organik: 0, anorganik: 0, residu: 0 },
-            };
+            reportData[m] = {};
+            areaList.forEach(area => {
+                reportData[m][area] = {};
+                [...structure.organik, ...structure.anorganik, ...structure.residu].forEach(item => {
+                    reportData[m][area][item.header] = 0;
+                });
+            });
         }
 
         rows.forEach(row => {
             const dateObj = new Date(row.recorded_at);
-            const monthIndex = dateObj.getMonth(); 
+            const monthIndex = dateObj.getMonth(); // 0 = Januari, 11 = Desember
             
-            let area = row.area_label ? row.area_label.trim() : '';
-            const status = row.status ? row.status.trim() : '';
+            const dbArea = row.area_label ? row.area_label.toLowerCase() : '';
+            const dbItem = row.item_label ? row.item_label.toLowerCase() : '';
             const weight = parseFloat(row.weight_kg) || 0;
 
-            let targetAreaKey = null;
-            if (area.toLowerCase().includes('kantor')) targetAreaKey = 'Area Kantor';
-            else if (area.toLowerCase().includes('parkir')) targetAreaKey = 'Area Parkir';
-            else if (area.toLowerCase().includes('makan')) targetAreaKey = 'Area Makan';
-            else if (area.toLowerCase().includes('tunggu')) targetAreaKey = 'Area Ruang Tunggu';
+            let targetArea = null;
+            if (dbArea.includes('kantor')) targetArea = 'Area Kantor';
+            else if (dbArea.includes('parkir')) targetArea = 'Area Parkir';
+            else if (dbArea.includes('makan')) targetArea = 'Area Makan';
+            else if (dbArea.includes('tunggu')) targetArea = 'Area Ruang Tunggu';
 
-            if (targetAreaKey) {
-                if (status === 'Organik Terpilah') reportData[monthIndex][targetAreaKey].organik += weight;
-                else if (status === 'Anorganik Terpilah') reportData[monthIndex][targetAreaKey].anorganik += weight;
-                else if (status === 'Tidak Terkelola') reportData[monthIndex][targetAreaKey].residu += weight;
+            if (targetArea) {
+                let matched = false;
+                const allItems = [...structure.organik, ...structure.anorganik, ...structure.residu];
+                for (const item of allItems) {
+                    if (item.keywords.some(k => dbItem.includes(k))) {
+                        reportData[monthIndex][targetArea][item.header] += weight;
+                        matched = true;
+                        break; 
+                    }
+                }
+                if (!matched) reportData[monthIndex][targetArea]['Residu'] += weight; 
             }
         });
 
+        // 4. Buat Excel
         const workbook = new excel.Workbook();
         const worksheet = workbook.addWorksheet(`Laporan Tahun ${targetYear}`);
 
-        // --- HITUNG TOTAL MANUAL ---
-        const grandTotals = {};
-        const columnLetters = ['C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S'];
-        columnLetters.forEach(l => grandTotals[l] = 0);
+        // --- HEADER ---
+        const colsPerArea = 15;
+        const totalCols = 2 + (colsPerArea * areaList.length);
 
-        // --- FIX: SETTING LEBAR KOLOM ---
-        for (let i = 3; i <= 19; i++) { // C - S
-            worksheet.getColumn(i).width = 15;
-        }
-        worksheet.getColumn(1).width = 5;  
-        worksheet.getColumn(2).width = 30; // Bulan
+        // Helper Huruf Kolom
+        const getColLetter = (n) => {
+            let s = "";
+            while(n >= 0) {
+                s = String.fromCharCode(n % 26 + 65) + s;
+                n = Math.floor(n / 26) - 1;
+            }
+            return s;
+        };
+        const lastColLetter = getColLetter(totalCols - 1);
 
-        // Header
-        worksheet.mergeCells('A1:R1');
+        worksheet.mergeCells(`A1:${lastColLetter}1`);
         worksheet.getCell('A1').value = `REKAMAN TIMBULAN SAMPAH - TAHUN ${targetYear}`;
         worksheet.getCell('A1').font = { bold: true, size: 14 };
         worksheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
 
-        worksheet.mergeCells('A3:A5'); worksheet.getCell('A3').value = 'No';
-        worksheet.mergeCells('B3:B5'); worksheet.getCell('B3').value = 'Bulan';
+        let currentIdx = 3; 
+        
+        worksheet.getCell('A3').value = 'No'; worksheet.mergeCells('A3:A5');
+        worksheet.getCell('B3').value = 'Bulan'; worksheet.mergeCells('B3:B5'); // Bedanya disini: BULAN
 
-        worksheet.mergeCells('C3:F3'); worksheet.getCell('C3').value = 'Area Kantor';
-        worksheet.getCell('C4').value = 'Sampah'; worksheet.getCell('D4').value = 'Sampah'; worksheet.getCell('E4').value = 'Sampah'; worksheet.getCell('F4').value = 'Total';
-        worksheet.getCell('C5').value = 'Organik'; worksheet.getCell('D5').value = 'Anorganik'; worksheet.getCell('E5').value = 'Lainnya'; worksheet.getCell('F5').value = '(Kg)';
+        areaList.forEach(area => {
+            const startCol = currentIdx;
+            const endCol = currentIdx + colsPerArea - 1;
+            worksheet.mergeCells(3, startCol, 3, endCol);
+            worksheet.getCell(3, startCol).value = area.toUpperCase();
+            
+            // Baris 4
+            worksheet.mergeCells(4, currentIdx, 4, currentIdx + 1);
+            worksheet.getCell(4, currentIdx).value = 'Organik';
+            worksheet.getCell(4, currentIdx + 2).value = 'Total Organik';
 
-        worksheet.mergeCells('G3:J3'); worksheet.getCell('G3').value = 'Area Parkir';
-        worksheet.getCell('G4').value = 'Sampah'; worksheet.getCell('H4').value = 'Sampah'; worksheet.getCell('I4').value = 'Sampah'; worksheet.getCell('J4').value = 'Total';
-        worksheet.getCell('G5').value = 'Organik'; worksheet.getCell('H5').value = 'Anorganik'; worksheet.getCell('I5').value = 'Lainnya'; worksheet.getCell('J5').value = '(Kg)';
+            const anorgStart = currentIdx + 3;
+            worksheet.mergeCells(4, anorgStart, 4, anorgStart + 4);
+            worksheet.getCell(4, anorgStart).value = 'Anorganik';
+            worksheet.getCell(4, anorgStart + 5).value = 'Total Anorganik';
+            worksheet.getCell(4, anorgStart + 6).value = 'Total Terkelola';
 
-        worksheet.mergeCells('K3:N3'); worksheet.getCell('K3').value = 'Area Makan';
-        worksheet.getCell('K4').value = 'Sampah'; worksheet.getCell('L4').value = 'Sampah'; worksheet.getCell('M4').value = 'Sampah'; worksheet.getCell('N4').value = 'Total';
-        worksheet.getCell('K5').value = 'Organik'; worksheet.getCell('L5').value = 'Anorganik'; worksheet.getCell('M5').value = 'Lainnya'; worksheet.getCell('N5').value = '(Kg)';
+            const residuStart = anorgStart + 7;
+            worksheet.mergeCells(4, residuStart, 4, residuStart + 3);
+            worksheet.getCell(4, residuStart).value = 'Sampah Tidak Terkelola';
+            worksheet.getCell(4, residuStart + 4).value = 'Total Tidak Terkelola'; 
 
-        worksheet.mergeCells('O3:R3'); worksheet.getCell('O3').value = 'Area Ruang Tunggu';
-        worksheet.getCell('O4').value = 'Sampah'; worksheet.getCell('P4').value = 'Sampah'; worksheet.getCell('Q4').value = 'Sampah'; worksheet.getCell('R4').value = 'Total';
-        worksheet.getCell('O5').value = 'Organik'; worksheet.getCell('P5').value = 'Anorganik'; worksheet.getCell('Q5').value = 'Lainnya'; worksheet.getCell('R5').value = '(Kg)';
+            // Baris 5 (Nama Item)
+            let subIdx = currentIdx;
+            structure.organik.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
+            worksheet.getCell(5, subIdx++).value = '(Kg)'; 
+            structure.anorganik.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
+            worksheet.getCell(5, subIdx++).value = '(Kg)'; 
+            worksheet.getCell(5, subIdx++).value = '(Kg)'; 
+            structure.residu.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
+            worksheet.getCell(5, subIdx++).value = '(Kg)'; 
 
-        worksheet.mergeCells('S3:S5'); worksheet.getCell('S3').value = 'TOTAL BULANAN (Kg)';
-
-        ['A3', 'B3', 'C3', 'G3', 'K3', 'O3', 'S3'].forEach(cell => {
-            worksheet.getCell(cell).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
-            worksheet.getCell(cell).font = { bold: true };
-            worksheet.getCell(cell).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+            currentIdx += colsPerArea;
         });
 
-        for (let r = 4; r <= 5; r++) {
-             worksheet.getRow(r).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        // Styling Header
+        for (let r = 3; r <= 5; r++) {
+            const row = worksheet.getRow(r);
+            row.height = 30; // HEADER TINGGI
+            for (let c = 1; c <= totalCols; c++) {
+                const cell = row.getCell(c);
+                cell.font = { bold: true, size: 9 };
+                cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+                
+                const colModulo = (c - 2) % colsPerArea; 
+                if (colModulo === 0 && c > 2) { 
+                     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF0000' } }; 
+                     cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; 
+                }
+            }
         }
+
+        // 5. ISI DATA (Looping 12 Bulan)
+        const grandTotals = new Array(totalCols + 1).fill(0);
 
         for (let m = 0; m < 12; m++) {
-            const r = reportData[m];
+            const rowValues = [m + 1, monthNames[m]]; // No, Nama Bulan
             
-            const vals = {
-                'C': r['Area Kantor'].organik, 'D': r['Area Kantor'].anorganik, 'E': r['Area Kantor'].residu,
-                'F': r['Area Kantor'].organik + r['Area Kantor'].anorganik + r['Area Kantor'].residu,
-                'G': r['Area Parkir'].organik, 'H': r['Area Parkir'].anorganik, 'I': r['Area Parkir'].residu,
-                'J': r['Area Parkir'].organik + r['Area Parkir'].anorganik + r['Area Parkir'].residu,
-                'K': r['Area Makan'].organik, 'L': r['Area Makan'].anorganik, 'M': r['Area Makan'].residu,
-                'N': r['Area Makan'].organik + r['Area Makan'].anorganik + r['Area Makan'].residu,
-                'O': r['Area Ruang Tunggu'].organik, 'P': r['Area Ruang Tunggu'].anorganik, 'Q': r['Area Ruang Tunggu'].residu,
-                'R': r['Area Ruang Tunggu'].organik + r['Area Ruang Tunggu'].anorganik + r['Area Ruang Tunggu'].residu,
-            };
-            vals['S'] = vals['F'] + vals['J'] + vals['N'] + vals['R'];
+            areaList.forEach(area => {
+                const r = reportData[m][area];
+                let sumOrganik = 0; structure.organik.forEach(i => sumOrganik += (r[i.header] || 0));
+                let sumAnorganik = 0; structure.anorganik.forEach(i => sumAnorganik += (r[i.header] || 0));
+                let sumResidu = 0; structure.residu.forEach(i => sumResidu += (r[i.header] || 0));
+                const totalTerkelola = sumOrganik + sumAnorganik;
 
-            // Accumulate
-            for(let key in vals) { grandTotals[key] += vals[key]; }
+                structure.organik.forEach(i => rowValues.push(r[i.header] || '-'));
+                rowValues.push(sumOrganik || '-');
+                structure.anorganik.forEach(i => rowValues.push(r[i.header] || '-'));
+                rowValues.push(sumAnorganik || '-');
+                rowValues.push(totalTerkelola || '-');
+                structure.residu.forEach(i => rowValues.push(r[i.header] || '-'));
+                rowValues.push(sumResidu || '-');
+            });
 
-            const row = worksheet.getRow(m + 6);
-            row.values = [
-                m + 1, monthNames[m], 
-                vals['C'], vals['D'], vals['E'], vals['F'],
-                vals['G'], vals['H'], vals['I'], vals['J'],
-                vals['K'], vals['L'], vals['M'], vals['N'],
-                vals['O'], vals['P'], vals['Q'], vals['R'],
-                vals['S']
-            ];
+            const excelRow = worksheet.getRow(m + 6);
+            excelRow.values = rowValues;
+            excelRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+                cell.alignment = { horizontal: 'center' };
+                const val = cell.value;
+                if (typeof val === 'number') {
+                    grandTotals[colNumber] = (grandTotals[colNumber] || 0) + val;
+                }
+            });
         }
 
-        // --- FOOTER ---
-        const rowTotalKg = 12 + 6; 
-        worksheet.getCell(`A${rowTotalKg}`).value = 'Total/jenis (kg/tahun)';
-        worksheet.mergeCells(`A${rowTotalKg}:B${rowTotalKg}`);
-        const rowTotalTon = rowTotalKg + 1; 
-        worksheet.getCell(`A${rowTotalTon}`).value = 'Total/jenis (ton/tahun)';
-        worksheet.mergeCells(`A${rowTotalTon}:B${rowTotalTon}`);
-        const rowAvg = rowTotalTon + 1; 
-        worksheet.getCell(`A${rowAvg}`).value = 'Rata-rata perhari (kg/hari)';
-        worksheet.mergeCells(`A${rowAvg}:B${rowAvg}`);
+        // 6. FOOTER
+        const rowTotalKg = 12 + 6; // 12 bulan + 6 baris header
+        const rowTotalTon = rowTotalKg + 1;
+        const rowAvg = rowTotalKg + 2;
+
+        worksheet.getCell(`A${rowTotalKg}`).value = 'Total (kg/thn)';
+        worksheet.getCell(`A${rowTotalTon}`).value = 'Total (ton/thn)';
+        worksheet.getCell(`A${rowAvg}`).value = 'Rata-rata (kg/hari)';
 
         const daysInYear = (targetYear % 4 === 0 && targetYear % 100 > 0) || targetYear % 400 === 0 ? 366 : 365;
 
-        for(let col=3; col<=19; col++) {
-            const l = worksheet.getColumn(col).letter;
-            worksheet.getCell(`${l}${rowTotalKg}`).value = grandTotals[l]; // MANUAL
-            worksheet.getCell(`${l}${rowTotalTon}`).value = grandTotals[l] / 1000; // MANUAL
-            worksheet.getCell(`${l}${rowTotalTon}`).numFmt = '0.000';
-            worksheet.getCell(`${l}${rowAvg}`).value = grandTotals[l] / daysInYear; // MANUAL
-            worksheet.getCell(`${l}${rowAvg}`).numFmt = '0.00';
+        for (let c = 3; c <= totalCols; c++) {
+            const totalVal = grandTotals[c] || 0;
+            worksheet.getCell(rowTotalKg, c).value = totalVal;
+            worksheet.getCell(rowTotalTon, c).value = (totalVal / 1000);
+            worksheet.getCell(rowTotalTon, c).numFmt = '0.000';
+            worksheet.getCell(rowAvg, c).value = (totalVal / daysInYear);
+            worksheet.getCell(rowAvg, c).numFmt = '0.00';
         }
 
         [rowTotalKg, rowTotalTon, rowAvg].forEach(r => {
-            const cellA = worksheet.getCell(`A${r}`);
-            cellA.font = { bold: true };
-            cellA.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
-            for(let c=3; c<=19; c++) {
-                const cell = worksheet.getCell(`${worksheet.getColumn(c).letter}${r}`);
+            const row = worksheet.getRow(r);
+            row.eachCell({ includeEmpty: true }, (cell) => {
                 cell.font = { bold: true };
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: (r === rowTotalTon ? 'FFFFCCBC' : 'FFFFE0B2') } };
-            }
-        });
-
-        worksheet.eachRow((row, rowNumber) => {
-            row.eachCell((cell) => {
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
                 cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
-                cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
             });
         });
 
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename=Laporan_Tahunan_${targetYear}.xlsx`);
+        // Set Lebar Kolom
+        worksheet.getColumn(1).width = 5; 
+        worksheet.getColumn(2).width = 15; // Bulan butuh agak lebar
+        for(let i=3; i<=totalCols; i++) {
+            worksheet.getColumn(i).width = 17; // LEBAR 17 (Sama kayak bulanan)
+        }
 
+        // Kirim
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename=Laporan Timbulan Sampah Tahunan ${targetYear}.xlsx`);
         await workbook.xlsx.write(res);
         res.end();
 
     } catch (err) {
-        console.error('Error saat ekspor Tahunan:', err.message);
-        res.status(500).json({ message: 'Gagal membuat file Excel.' });
+        console.error('Error Excel Tahunan:', err);
+        res.status(500).json({ message: 'Gagal export tahunan' });
     }
 });
 
-// --- API MANAJEMEN PETUGAS (Baru) ---
+// Konfigurasi Font (Pakai Roboto yang baru didownload)
+// Konfigurasi Font (Kita pakai nama 'normal.ttf' agar seragam)
+const fonts = {
+  Helvetica: {
+    normal: 'Helvetica',
+    bold: 'Helvetica-Bold',
+    italics: 'Helvetica-Oblique',
+    bolditalics: 'Helvetica-BoldOblique'
+  }
+};
+const printer = new PdfPrinter(fonts);
 
-// 1. Ambil Daftar Petugas
-app.get('/api/petugas', async (req, res) => {
-    try {
-        const result = await pool.query('SELECT id, username FROM petugas ORDER BY id DESC');
-        res.json(result.rows);
-    } catch (err) {
-        res.status(500).json({ message: 'Gagal mengambil data petugas' });
-    }
+// --- 1. EXPORT PDF BULANAN (RINGKASAN) ---
+app.get('/api/export/pdf/monthly', async (req, res) => {
+  const targetMonth = req.query.month ? parseInt(req.query.month) : new Date().getMonth() + 1;
+  const targetYear = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM waste_records 
+       WHERE EXTRACT(MONTH FROM recorded_at) = $1 AND EXTRACT(YEAR FROM recorded_at) = $2`,
+      [targetMonth, targetYear]
+    );
+
+    const docDefinition = generateSummaryPDF(rows, targetMonth, targetYear, 'monthly');
+    
+    const pdfDoc = printer.createPdfKitDocument(docDefinition);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=Laporan_Ringkas_Bulan_${targetMonth}-${targetYear}.pdf`);
+    pdfDoc.pipe(res);
+    pdfDoc.end();
+
+  } catch (err) {
+    console.error('Error PDF Monthly:', err);
+    res.status(500).json({ message: 'Gagal membuat PDF Bulanan' });
+  }
 });
 
-// 2. Tambah Petugas Baru
-app.post('/api/petugas', async (req, res) => {
-    const { username, password } = req.body;
-    try {
-        // Cek username kembar
-        const cek = await pool.query('SELECT * FROM petugas WHERE username = $1', [username]);
-        if (cek.rows.length > 0) return res.status(400).json({ message: 'Username sudah ada!' });
+// --- 2. EXPORT PDF TAHUNAN (RINGKASAN) ---
+app.get('/api/export/pdf/yearly', async (req, res) => {
+  const targetYear = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
 
-        // Simpan (Password plain text dulu agar mudah, atau hash jika mau aman)
-        // Untuk kecepatan H-1, kita simpan plain text atau hash sederhana
-        const newUser = await pool.query(
-            'INSERT INTO petugas (username, password) VALUES ($1, $2) RETURNING *',
-            [username, password]
-        );
-        res.json({ message: 'Petugas berhasil dibuat', petugas: newUser.rows[0] });
-    } catch (err) {
-        res.status(500).json({ message: 'Gagal menambah petugas' });
-    }
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM waste_records 
+       WHERE EXTRACT(YEAR FROM recorded_at) = $1`,
+      [targetYear]
+    );
+
+    const docDefinition = generateSummaryPDF(rows, null, targetYear, 'yearly');
+
+    const pdfDoc = printer.createPdfKitDocument(docDefinition);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=Laporan Timbulan Sampah Tahun${targetYear}.pdf`);
+    pdfDoc.pipe(res);
+    pdfDoc.end();
+
+  } catch (err) {
+    console.error('Error PDF Yearly:', err);
+    res.status(500).json({ message: 'Gagal membuat PDF Tahunan' });
+  }
 });
 
-// 3. Hapus Petugas
-app.delete('/api/petugas/:id', async (req, res) => {
-    try {
-        await pool.query('DELETE FROM petugas WHERE id = $1', [req.params.id]);
-        res.json({ message: 'Petugas dihapus' });
-    } catch (err) {
-        res.status(500).json({ message: 'Gagal menghapus' });
-    }
-});
+// --- FUNGSI GENERATOR PDF ---
+function generateSummaryPDF(rows, month, year, type) {
+    // 1. Olah Data
+    const summary = {
+      'Area Kantor': { organik: 0, anorganik: 0, residu: 0 },
+      'Area Parkir': { organik: 0, anorganik: 0, residu: 0 },
+      'Area Makan': { organik: 0, anorganik: 0, residu: 0 },
+      'Area Ruang Tunggu': { organik: 0, anorganik: 0, residu: 0 }
+    };
 
-// 4. LOGIN KHUSUS PETUGAS
-app.post('/api/login-petugas', async (req, res) => {
-    const { username, password } = req.body;
-    try {
-        const result = await pool.query('SELECT * FROM petugas WHERE username = $1', [username]);
-        if (result.rows.length === 0) return res.status(404).json({ message: 'Petugas tidak ditemukan' });
+    rows.forEach(row => {
+      const dbArea = row.area_label ? row.area_label.toLowerCase() : '';
+      const status = row.status ? row.status.trim() : '';
+      const weight = parseFloat(row.weight_kg) || 0;
 
-        const petugas = result.rows[0];
-        // Cek password (langsung string compare karena dibuat admin)
-        if (password !== petugas.password) {
-            return res.status(401).json({ message: 'Password salah' });
-        }
+      let targetArea = null;
+      if (dbArea.includes('kantor')) targetArea = 'Area Kantor';
+      else if (dbArea.includes('parkir')) targetArea = 'Area Parkir';
+      else if (dbArea.includes('makan')) targetArea = 'Area Makan';
+      else if (dbArea.includes('tunggu')) targetArea = 'Area Ruang Tunggu';
 
-        res.json({ message: 'Login Berhasil', role: 'petugas', username: petugas.username });
-    } catch (err) {
-        res.status(500).json({ message: 'Server Error' });
-    }
-});
+      if (targetArea) {
+        if (status === 'Organik Terpilah') summary[targetArea].organik += weight;
+        else if (status === 'Anorganik Terpilah') summary[targetArea].anorganik += weight;
+        else if (status === 'Tidak Terkelola') summary[targetArea].residu += weight;
+      }
+    });
 
-// --- EXPORT APP (VERCEL) ---
-if (require.main === module) {
-    app.listen(PORT, () => console.log(`Server berjalan di http://localhost:${PORT}`));
+    // 2. Body Tabel
+    const tableBody = [];
+    tableBody.push([
+      { text: 'No', style: 'tableHeader' },
+      { text: 'Lokasi / Area', style: 'tableHeader', alignment: 'left' },
+      { text: 'Organik (Kg)', style: 'tableHeader' },
+      { text: 'Anorganik (Kg)', style: 'tableHeader' },
+      { text: 'Tidak Terkelola (Kg)', style: 'tableHeader' },
+      { text: 'Total (Kg)', style: 'tableHeader', fillColor: '#eeeeee' }
+    ]);
+
+    let no = 1;
+    let grandTotalOrganik = 0;
+    let grandTotalAnorganik = 0;
+    let grandTotalResidu = 0;
+
+    Object.keys(summary).forEach(area => {
+      const s = summary[area];
+      const totalArea = s.organik + s.anorganik + s.residu;
+      grandTotalOrganik += s.organik;
+      grandTotalAnorganik += s.anorganik;
+      grandTotalResidu += s.residu;
+
+      tableBody.push([
+        { text: no++, alignment: 'center' },
+        { text: area, alignment: 'left' },
+        { text: s.organik.toFixed(2), alignment: 'center' },
+        { text: s.anorganik.toFixed(2), alignment: 'center' },
+        { text: s.residu.toFixed(2), alignment: 'center' },
+        { text: totalArea.toFixed(2), alignment: 'center', bold: true }
+      ]);
+    });
+
+    const grandTotalAll = grandTotalOrganik + grandTotalAnorganik + grandTotalResidu;
+    tableBody.push([
+      { text: 'TOTAL KESELURUHAN', colSpan: 2, style: 'tableFooter', alignment: 'center' },
+      {},
+      { text: grandTotalOrganik.toFixed(2), style: 'tableFooter', alignment: 'center' },
+      { text: grandTotalAnorganik.toFixed(2), style: 'tableFooter', alignment: 'center' },
+      { text: grandTotalResidu.toFixed(2), style: 'tableFooter', alignment: 'center' },
+      { text: grandTotalAll.toFixed(2), style: 'tableFooter', alignment: 'center' }
+    ]);
+
+    // 3. Judul
+    const titleText = type === 'monthly' 
+        ? `LAPORAN RINGKASAN BULAN ${month}/${year}` 
+        : `LAPORAN RINGKASAN TAHUN ${year}`;
+
+    return {
+      pageSize: 'A4',
+      pageOrientation: 'landscape',
+      content: [
+        { text: 'REKAMAN TIMBULAN SAMPAH', style: 'header' },
+        { text: titleText, style: 'subheader' },
+        { text: '\n' },
+        {
+          table: {
+            headerRows: 1,
+            widths: ['auto', '*', '*', '*', '*', '*'],
+            body: tableBody
+          },
+          layout: {
+            fillColor: function (rowIndex) { return (rowIndex === 0) ? '#4CAF50' : null; }
+          }
+        },
+        { text: '\n\n' },
+        { text: `Dicetak pada: ${new Date().toLocaleString('id-ID')}`, style: 'small' }
+      ],
+      styles: {
+        header: { fontSize: 18, bold: true, alignment: 'center', margin: [0, 0, 0, 5] },
+        subheader: { fontSize: 12, bold: true, alignment: 'center', margin: [0, 0, 0, 20] },
+        tableHeader: { bold: true, fontSize: 11, color: 'white', alignment: 'center', margin: [0, 5, 0, 5] },
+        tableFooter: { bold: true, fontSize: 11, fillColor: '#dcedc8', margin: [0, 5, 0, 5] },
+        small: { fontSize: 8, italics: true, alignment: 'right', color: 'grey' }
+      },
+      // INI KUNCINYA: Gunakan Helvetica sebagai Default Font
+      defaultStyle: {
+        font: 'Helvetica'
+      }
+    };
 }
+// --- EXPORT APP (PENTING UNTUK VERCEL) ---
+if (require.main === module) {
+    app.listen(PORT, () => console.log(`Server berjalan di http://localhost:${PORT}`));
+}
+
 module.exports = app;
