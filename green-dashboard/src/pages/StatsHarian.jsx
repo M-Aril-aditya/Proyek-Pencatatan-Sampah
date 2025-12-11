@@ -3,9 +3,6 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-// Warna Baru: Hijau (Organik), Kuning/Oranye (Anorganik), Merah (Residu)
-const COLORS = ['#27ae60', '#f39c12', '#c0392b']; 
-
 function StatsHarian() {
   const navigate = useNavigate();
   const [pieData, setPieData] = useState([]);
@@ -13,6 +10,13 @@ function StatsHarian() {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [totalWeight, setTotalWeight] = useState(0);
+
+  // --- LOGIKA WARNA BARU (Berdasarkan Nama Kategori) ---
+  const getPieColor = (name) => {
+    if (name === 'Terkelola') return '#4CAF50';       // HIJAU
+    if (name === 'Tidak Terkelola') return '#F44336'; // MERAH
+    return '#8884d8'; // Warna default (abu/ungu) jika nama tidak dikenali
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -79,8 +83,9 @@ function StatsHarian() {
                 fill="#8884d8" 
                 dataKey="value"
               >
+                {/* PEMETAAN WARNA YANG DIPERBAIKI */}
                 {pieData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  <Cell key={`cell-${index}`} fill={getPieColor(entry.name)} />
                 ))}
               </Pie>
               <Tooltip formatter={(value) => `${value.toFixed(2)} Kg`} />
@@ -99,8 +104,8 @@ function StatsHarian() {
                 <tr>
                   <th style={styles.th}>Area</th>
                   <th style={styles.th}>Nama Item</th>
-                  <th style={styles.th}>Pengelola</th> {/* <-- Kolom Baru */}
-                  <th style={styles.th}>Status</th>     {/* <-- Kolom Baru */}
+                  <th style={styles.th}>Pengelola</th>
+                  <th style={styles.th}>Status</th>
                   <th style={styles.th}>Bobot (Kg)</th>
                   <th style={styles.th}>Petugas</th>
                   <th style={styles.th}>Waktu Catat</th>
@@ -112,8 +117,8 @@ function StatsHarian() {
                     <tr key={index}>
                       <td style={styles.td}>{row.area_label}</td>
                       <td style={styles.td}>{row.item_label}</td>
-                      <td style={styles.td}>{row.pengelola}</td> {/* <-- Data Baru */}
-                      <td style={styles.td}>{row.status}</td>     {/* <-- Data Baru */}
+                      <td style={styles.td}>{row.pengelola}</td>
+                      <td style={styles.td}>{row.status}</td>
                       <td style={styles.td}>{parseFloat(row.weight_kg).toFixed(2)}</td>
                       <td style={styles.td}>{row.petugas_name}</td>
                       <td style={styles.td}>{new Date(row.recorded_at).toLocaleString('id-ID')}</td>
