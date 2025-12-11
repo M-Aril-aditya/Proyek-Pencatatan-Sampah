@@ -243,10 +243,15 @@ function getSQLDateCondition(range, year, month, week, specificDate) {
 }
 
 // --- E. STATISTIK & RECORDS ---
+// --- D. STATISTIK & DATA ---
+
+// (Fungsi getSQLDateCondition biarkan saja, tidak berubah)
+
 app.get('/api/stats', async (req, res) => {
-  const { range, year, month, week, date } = req.query;
   try {
+    const { range, year, month, week, date } = req.query;
     const dateCondition = getSQLDateCondition(range, year, month, week, date);
+    
     const query = `
       SELECT 
         COALESCE(SUM(CASE WHEN status = 'Organik Terpilah' THEN weight_kg ELSE 0 END), 0) as total_organik,
@@ -254,33 +259,23 @@ app.get('/api/stats', async (req, res) => {
         COALESCE(SUM(CASE WHEN status = 'Tidak Terkelola' THEN weight_kg ELSE 0 END), 0) as total_residu
       FROM waste_records WHERE ${dateCondition};
     `;
+    
     const statsQuery = await pool.query(query);
     const data = statsQuery.rows[0];
+
+    // --- LOGIKA BARU: GABUNGKAN ORGANIK + ANORGANIK ---
+    const totalTerkelola = parseFloat(data.total_organik) + parseFloat(data.total_anorganik);
+    const totalResidu = parseFloat(data.total_residu);
+
     res.json([
-      { name: 'Organik', value: parseFloat(data.total_organik) },
-      { name: 'Anorganik', value: parseFloat(data.total_anorganik) },
-      { name: 'Tidak Terkelola', value: parseFloat(data.total_residu) }
+      { name: 'Terkelola', value: totalTerkelola },
+      { name: 'Tidak Terkelola', value: totalResidu }
     ]);
+    
   } catch (err) {
     res.status(500).json({ message: 'Server error statistics.' });
   }
 });
-
-app.get('/api/records', async (req, res) => {
-  const { range, year, month, week, date } = req.query;
-  try {
-    const dateCondition = getSQLDateCondition(range, year, month, week, date);
-    const query = `
-      SELECT area_label, item_label, pengelola, status, weight_kg, petugas_name, recorded_at
-      FROM waste_records WHERE ${dateCondition} ORDER BY recorded_at DESC;
-    `;
-    const recordsQuery = await pool.query(query);
-    res.json(recordsQuery.rows);
-  } catch (err) {
-    res.status(500).json({ message: 'Server error records.' });
-  }
-});
-
 // --- F. HAPUS SEMUA DATA ---
 app.delete('/api/clear-data', async (req, res) => {
     try {
