@@ -247,11 +247,16 @@ function getSQLDateCondition(range, year, month, week, specificDate) {
 
 // (Fungsi getSQLDateCondition biarkan saja, tidak berubah)
 
+// --- D. STATISTIK & DATA (MODIFIKASI: HANYA 2 KATEGORI) ---
+
+// Pastikan fungsi getSQLDateCondition tetap ada di atas kode ini
+
 app.get('/api/stats', async (req, res) => {
   try {
     const { range, year, month, week, date } = req.query;
     const dateCondition = getSQLDateCondition(range, year, month, week, date);
     
+    // 1. Ambil data mentah (3 kategori) dari database
     const query = `
       SELECT 
         COALESCE(SUM(CASE WHEN status = 'Organik Terpilah' THEN weight_kg ELSE 0 END), 0) as total_organik,
@@ -263,13 +268,14 @@ app.get('/api/stats', async (req, res) => {
     const statsQuery = await pool.query(query);
     const data = statsQuery.rows[0];
 
-    // --- LOGIKA BARU: GABUNGKAN ORGANIK + ANORGANIK ---
-    const totalTerkelola = parseFloat(data.total_organik) + parseFloat(data.total_anorganik);
-    const totalResidu = parseFloat(data.total_residu);
+    // 2. GABUNGKAN DATA DI SINI (JADI 2 KATEGORI)
+    const terkelola = parseFloat(data.total_organik) + parseFloat(data.total_anorganik);
+    const residu = parseFloat(data.total_residu);
 
+    // 3. Kirim ke Frontend hanya 2 data ini
     res.json([
-      { name: 'Terkelola', value: totalTerkelola },
-      { name: 'Tidak Terkelola', value: totalResidu }
+      { name: 'Terkelola', value: terkelola },        // Gabungan Organik + Anorganik
+      { name: 'Tidak Terkelola', value: residu }      // Residu murni
     ]);
     
   } catch (err) {
