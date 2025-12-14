@@ -1,42 +1,38 @@
-require('dotenv').config(); // Untuk testing lokal
+require('dotenv').config();
 const express = require('express');
-const cors = require('cors'); // Wajib ada untuk izin akses browser
+const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const csv = require('csv-parser');
 const excel = require('exceljs');
-const { Readable } = require('stream'); // Wajib untuk Vercel (baca buffer)
+const { Readable } = require('stream');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// --- 1. KONEKSI DATABASE (NEON / CLOUD) ---
+// --- 1. KONEKSI DATABASE ---
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // Wajib untuk Neon Database
+  ssl: { rejectUnauthorized: false }
 });
 
-// --- 2. CONFIG MULTER (MEMORY STORAGE) ---
-// Vercel tidak punya disk fisik, file disimpan di RAM sementara
+// --- 2. CONFIG MULTER ---
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
-const PdfPrinter = require('pdfmake');
-const path = require('path');
-// --- 3. MIDDLEWARE (PENTING) ---
-// Gunakan CORS paling sederhana agar semua device (Laptop/HP) diizinkan masuk
-app.use(cors()); 
+
+// --- 3. MIDDLEWARE ---
+app.use(cors());
 app.use(express.json());
 
 // --- 4. ROUTES UTAMA ---
 
-// Cek Status Server
 app.get('/', (req, res) => {
-    res.send('Green Backend is Running on Vercel!');
+    res.send('Green Backend is Running!');
 });
 
-// --- A. LOGIN ADMIN (WEB DASHBOARD) ---
+// --- A. LOGIN ADMIN ---
 app.post('/api/login', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -52,12 +48,11 @@ app.post('/api/login', async (req, res) => {
     const token = jwt.sign({ id: admin.id, username: admin.username }, process.env.JWT_SECRET || 'rahasia', { expiresIn: '1d' });
     res.json({ message: 'Login berhasil', token });
   } catch (err) {
-    console.error('Error login:', err.message);
     res.status(500).json({ message: 'Server error saat login.' });
   }
 });
 
-// --- B. LOGIN PETUGAS (MOBILE APP) ---
+// --- B. LOGIN PETUGAS ---
 app.post('/api/login-petugas', async (req, res) => {
     const { username, password } = req.body;
     try {
@@ -65,21 +60,17 @@ app.post('/api/login-petugas', async (req, res) => {
         if (result.rows.length === 0) return res.status(404).json({ message: 'Petugas tidak ditemukan' });
 
         const petugas = result.rows[0];
-        // Cek password (Plain text sesuai request Anda untuk kemudahan)
         if (password !== petugas.password) {
             return res.status(401).json({ message: 'Password salah' });
         }
 
         res.json({ message: 'Login Berhasil', role: 'petugas', username: petugas.username });
     } catch (err) {
-        console.error('Error login petugas:', err);
         res.status(500).json({ message: 'Server Error' });
     }
 });
 
-// --- C. MANAJEMEN PETUGAS (CRUD) ---
-
-// 1. Ambil Daftar Petugas
+// --- C. MANAJEMEN PETUGAS ---
 app.get('/api/petugas', async (req, res) => {
     try {
         const result = await pool.query('SELECT id, username FROM petugas ORDER BY id DESC');
@@ -89,11 +80,9 @@ app.get('/api/petugas', async (req, res) => {
     }
 });
 
-// 2. Tambah Petugas Baru
 app.post('/api/petugas', async (req, res) => {
     const { username, password } = req.body;
     try {
-        // Cek username kembar
         const cek = await pool.query('SELECT * FROM petugas WHERE username = $1', [username]);
         if (cek.rows.length > 0) return res.status(400).json({ message: 'Username sudah ada!' });
 
@@ -103,12 +92,10 @@ app.post('/api/petugas', async (req, res) => {
         );
         res.json({ message: 'Petugas berhasil dibuat', petugas: newUser.rows[0] });
     } catch (err) {
-        console.error(err);
         res.status(500).json({ message: 'Gagal menambah petugas' });
     }
 });
 
-// 3. Hapus Petugas
 app.delete('/api/petugas/:id', async (req, res) => {
     try {
         await pool.query('DELETE FROM petugas WHERE id = $1', [req.params.id]);
@@ -118,21 +105,15 @@ app.delete('/api/petugas/:id', async (req, res) => {
     }
 });
 
-
-// --- D. UPLOAD CSV (VERCEL STREAM MODE) ---
-// --- D. UPLOAD CSV (DENGAN FITUR BACKDATING / WAKTU MUNDUR) ---
+// --- D. UPLOAD CSV ---
 app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
   if (!req.files || req.files.length === 0) return res.status(400).json({ message: 'Tidak ada file.' });
 
   const processFile = (file) => {
     return new Promise((resolve, reject) => {
       const rowData = [];
-      
-      // Baca dari BUFFER (RAM)
       Readable.from(file.buffer)
-        .pipe(csv({
-            mapHeaders: ({ header }) => header.trim().replace(/^\uFEFF/, '') // Fix BOM & Spasi
-        }))
+        .pipe(csv({ mapHeaders: ({ header }) => header.trim().replace(/^\uFEFF/, '') }))
         .on('data', (data) => rowData.push(data))
         .on('error', (err) => reject(err))
         .on('end', async () => {
@@ -142,22 +123,7 @@ app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
             try {
                 await client.query('BEGIN');
                 for (const row of rowData) {
-                    
-                    // --- LOGIKA WAKTU (BARU) ---
-                    let recordedAt = new Date(); // Default: Waktu Detik Ini (Jika kolom Tanggal kosong)
-
-                    // Cek apakah di CSV ada kolom 'Tanggal', 'Waktu', atau 'Date'
-                    const csvDateString = row['Tanggal'] || row['Waktu'] || row['Date'];
-
-                    if (csvDateString) {
-                        const parsedDate = new Date(csvDateString);
-                        // Cek apakah format tanggal valid?
-                        if (!isNaN(parsedDate.getTime())) {
-                            recordedAt = parsedDate; // GUNAKAN WAKTU DARI CSV
-                        }
-                    }
-                    // ---------------------------
-
+                    let recordedAt = new Date(); 
                     const queryText = `
                         INSERT INTO waste_records 
                         (area_label, item_label, pengelola, status, weight_kg, petugas_name, recorded_at)
@@ -185,33 +151,28 @@ app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
   try {
     const promises = req.files.map(file => processFile(file));
     await Promise.all(promises);
-    res.json({ message: 'Upload berhasil. Waktu disesuaikan dengan isi file.' });
+    res.json({ message: 'Upload berhasil.' });
   } catch (err) {
-    console.error('System Error:', err);
     res.status(500).json({ message: 'Terjadi kesalahan sistem.' });
   }
 });
 
-// --- HELPER TANGGAL (Asia/Jakarta Logic) ---
+// --- HELPER DATE ---
 function getSQLDateCondition(range, year, month, week, specificDate) {
   const local_timestamp = "recorded_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta'";
   const jsDate = new Date();
-  
   const targetYear = year ? parseInt(year) : jsDate.getFullYear();
   const targetMonth = month ? parseInt(month) : jsDate.getMonth() + 1; 
   const tm = targetMonth.toString().padStart(2, '0');
-  
   const dayOfMonth = jsDate.getDate();
   let currentWeekOfMonth = 1;
   if (dayOfMonth >= 8 && dayOfMonth <= 14) currentWeekOfMonth = 2;
   else if (dayOfMonth >= 15 && dayOfMonth <= 21) currentWeekOfMonth = 3;
   else if (dayOfMonth >= 22) currentWeekOfMonth = 4;
   const targetWeek = week ? parseInt(week) : currentWeekOfMonth;
-
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
 
   let dateCondition = '';
-
   switch (range) {
     case 'weekly':
       let s, e;
@@ -232,31 +193,18 @@ function getSQLDateCondition(range, year, month, week, specificDate) {
     case 'yearly':
       dateCondition = `EXTRACT(YEAR FROM ${local_timestamp}) = ${targetYear}`;
       break;
-    default: // 'daily'
-      if (specificDate) {
-          dateCondition = `DATE(${local_timestamp}) = '${specificDate}'`;
-      } else {
-          dateCondition = `DATE(${local_timestamp}) = '${today}'`;
-      }
+    default: 
+      if (specificDate) dateCondition = `DATE(${local_timestamp}) = '${specificDate}'`;
+      else dateCondition = `DATE(${local_timestamp}) = '${today}'`;
   }
   return dateCondition;
 }
 
 // --- E. STATISTIK & RECORDS ---
-// --- D. STATISTIK & DATA ---
-
-// (Fungsi getSQLDateCondition biarkan saja, tidak berubah)
-
-// --- D. STATISTIK & DATA (MODIFIKASI: HANYA 2 KATEGORI) ---
-
-// Pastikan fungsi getSQLDateCondition tetap ada di atas kode ini
-
 app.get('/api/stats', async (req, res) => {
+  const { range, year, month, week, date } = req.query;
   try {
-    const { range, year, month, week, date } = req.query;
     const dateCondition = getSQLDateCondition(range, year, month, week, date);
-    
-    // 1. Ambil data mentah (3 kategori) dari database
     const query = `
       SELECT 
         COALESCE(SUM(CASE WHEN status = 'Organik Terpilah' THEN weight_kg ELSE 0 END), 0) as total_organik,
@@ -264,25 +212,34 @@ app.get('/api/stats', async (req, res) => {
         COALESCE(SUM(CASE WHEN status = 'Tidak Terkelola' THEN weight_kg ELSE 0 END), 0) as total_residu
       FROM waste_records WHERE ${dateCondition};
     `;
-    
     const statsQuery = await pool.query(query);
     const data = statsQuery.rows[0];
-
-    // 2. GABUNGKAN DATA DI SINI (JADI 2 KATEGORI)
-    const terkelola = parseFloat(data.total_organik) + parseFloat(data.total_anorganik);
-    const residu = parseFloat(data.total_residu);
-
-    // 3. Kirim ke Frontend hanya 2 data ini
     res.json([
-      { name: 'Terkelola', value: terkelola },        // Gabungan Organik + Anorganik
-      { name: 'Tidak Terkelola', value: residu }      // Residu murni
+      { name: 'Organik', value: parseFloat(data.total_organik) },
+      { name: 'Anorganik', value: parseFloat(data.total_anorganik) },
+      { name: 'Tidak Terkelola', value: parseFloat(data.total_residu) }
     ]);
-    
   } catch (err) {
     res.status(500).json({ message: 'Server error statistics.' });
   }
 });
-// --- F. HAPUS SEMUA DATA ---
+
+app.get('/api/records', async (req, res) => {
+  const { range, year, month, week, date } = req.query;
+  try {
+    const dateCondition = getSQLDateCondition(range, year, month, week, date);
+    const query = `
+      SELECT area_label, item_label, pengelola, status, weight_kg, petugas_name, recorded_at
+      FROM waste_records WHERE ${dateCondition} ORDER BY recorded_at DESC;
+    `;
+    const recordsQuery = await pool.query(query);
+    res.json(recordsQuery.rows);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error records.' });
+  }
+});
+
+// --- F. HAPUS DATA ---
 app.delete('/api/clear-data', async (req, res) => {
     try {
         await pool.query('TRUNCATE TABLE waste_records RESTART IDENTITY;');
@@ -290,15 +247,12 @@ app.delete('/api/clear-data', async (req, res) => {
     } catch (err) { res.status(500).json({ message: 'Error delete' }); }
 });
 
-// --- G. EKSPOR EXCEL BULANAN (LENGKAP) ---
-// --- G. EKSPOR EXCEL BULANAN (FORMAT DETAIL: JENIS SAMPAH & TOTAL) ---
-// --- G. EKSPOR EXCEL BULANAN (FORMAT DETAIL: JENIS SAMPAH & TOTAL) ---
+// --- G. EKSPOR EXCEL BULANAN (FORMAT LENGKAP & RAPI) ---
 app.get('/api/export/monthly', async (req, res) => {
     const targetMonth = req.query.month ? parseInt(req.query.month) : new Date().getMonth() + 1;
     const targetYear = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
 
     try {
-        // 1. Ambil Data
         const { rows } = await pool.query(
             `SELECT * FROM waste_records 
              WHERE EXTRACT(MONTH FROM recorded_at) = $1 AND EXTRACT(YEAR FROM recorded_at) = $2
@@ -306,7 +260,6 @@ app.get('/api/export/monthly', async (req, res) => {
             [targetMonth, targetYear]
         );
 
-        // 2. Konfigurasi Kolom
         const areaList = ['Area Kantor', 'Area Parkir', 'Area Makan', 'Area Ruang Tunggu'];
         const structure = {
             organik: [
@@ -328,7 +281,6 @@ app.get('/api/export/monthly', async (req, res) => {
             ]
         };
 
-        // 3. Proses Data
         const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
         const reportData = {};
 
@@ -368,15 +320,12 @@ app.get('/api/export/monthly', async (req, res) => {
             }
         });
 
-        // 4. Buat Excel
         const workbook = new excel.Workbook();
         const worksheet = workbook.addWorksheet(`Laporan ${targetMonth}-${targetYear}`);
 
-        // --- HEADER ---
         const colsPerArea = 15;
         const totalCols = 2 + (colsPerArea * areaList.length);
 
-        // Helper untuk huruf kolom
         const getColLetter = (n) => {
             let s = "";
             while(n >= 0) {
@@ -403,7 +352,6 @@ app.get('/api/export/monthly', async (req, res) => {
             worksheet.mergeCells(3, startCol, 3, endCol);
             worksheet.getCell(3, startCol).value = area.toUpperCase();
             
-            // Baris 4
             worksheet.mergeCells(4, currentIdx, 4, currentIdx + 1);
             worksheet.getCell(4, currentIdx).value = 'Organik';
             worksheet.getCell(4, currentIdx + 2).value = 'Total Organik';
@@ -412,7 +360,6 @@ app.get('/api/export/monthly', async (req, res) => {
             worksheet.mergeCells(4, anorgStart, 4, anorgStart + 4);
             worksheet.getCell(4, anorgStart).value = 'Anorganik';
             worksheet.getCell(4, anorgStart + 5).value = 'Total Anorganik';
-
             worksheet.getCell(4, anorgStart + 6).value = 'Total Terkelola';
 
             const residuStart = anorgStart + 7;
@@ -420,35 +367,28 @@ app.get('/api/export/monthly', async (req, res) => {
             worksheet.getCell(4, residuStart).value = 'Sampah Tidak Terkelola';
             worksheet.getCell(4, residuStart + 4).value = 'Total Tidak Terkelola'; 
 
-            // Baris 5 (Nama Item)
             let subIdx = currentIdx;
             structure.organik.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
             worksheet.getCell(5, subIdx++).value = '(Kg)'; 
-
             structure.anorganik.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
             worksheet.getCell(5, subIdx++).value = '(Kg)'; 
-
             worksheet.getCell(5, subIdx++).value = '(Kg)'; 
-
             structure.residu.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
             worksheet.getCell(5, subIdx++).value = '(Kg)'; 
 
             currentIdx += colsPerArea;
         });
 
-        // Styling
         for (let r = 3; r <= 5; r++) {
             const row = worksheet.getRow(r);
-            // --- PERBAIKAN TINGGI BARIS HEADER ---
-            row.height = 30; // Biar muat teks 2 baris (wrap text)
-            
+            row.height = 30; // HEADER TINGGI AGAR MUAT
             for (let c = 1; c <= totalCols; c++) {
                 const cell = row.getCell(c);
                 cell.font = { bold: true, size: 9 };
                 cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
                 cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
                 cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
-
+                
                 const colModulo = (c - 2) % colsPerArea; 
                 if (colModulo === 0 && c > 2) { 
                      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF0000' } }; 
@@ -457,20 +397,15 @@ app.get('/api/export/monthly', async (req, res) => {
             }
         }
 
-        // 5. ISI DATA
         const grandTotals = new Array(totalCols + 1).fill(0);
 
         for (let d = 1; d <= daysInMonth; d++) {
             const rowValues = [d, d];
-            
             areaList.forEach(area => {
                 const r = reportData[d][area];
-                let sumOrganik = 0;
-                structure.organik.forEach(i => sumOrganik += (r[i.header] || 0));
-                let sumAnorganik = 0;
-                structure.anorganik.forEach(i => sumAnorganik += (r[i.header] || 0));
-                let sumResidu = 0;
-                structure.residu.forEach(i => sumResidu += (r[i.header] || 0));
+                let sumOrganik = 0; structure.organik.forEach(i => sumOrganik += (r[i.header] || 0));
+                let sumAnorganik = 0; structure.anorganik.forEach(i => sumAnorganik += (r[i.header] || 0));
+                let sumResidu = 0; structure.residu.forEach(i => sumResidu += (r[i.header] || 0));
                 const totalTerkelola = sumOrganik + sumAnorganik;
 
                 structure.organik.forEach(i => rowValues.push(r[i.header] || '-'));
@@ -494,7 +429,6 @@ app.get('/api/export/monthly', async (req, res) => {
             });
         }
 
-        // 6. FOOTER
         const rowTotalKg = daysInMonth + 6;
         const rowTotalTon = rowTotalKg + 1;
         const rowAvg = rowTotalKg + 2;
@@ -521,16 +455,14 @@ app.get('/api/export/monthly', async (req, res) => {
             });
         });
 
-        // --- PERBAIKAN LEBAR KOLOM (AGAR MUAT) ---
-        worksheet.getColumn(1).width = 5;  // No
-        worksheet.getColumn(2).width = 8;  // Tanggal
+        worksheet.getColumn(1).width = 5; 
+        worksheet.getColumn(2).width = 8; 
         for(let i=3; i<=totalCols; i++) {
-            worksheet.getColumn(i).width = 17; // LEBARKAN JADI 17 (Dulu 12)
+            worksheet.getColumn(i).width = 17; // LEBAR KOLOM DIPERBESAR
         }
 
-        // Kirim
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename=Laporan Timbulan Sampah Bulan${targetMonth}-${targetYear}.xlsx`);
+        res.setHeader('Content-Disposition', `attachment; filename=Laporan_Detail_${targetMonth}-${targetYear}.xlsx`);
         await workbook.xlsx.write(res);
         res.end();
 
@@ -540,12 +472,10 @@ app.get('/api/export/monthly', async (req, res) => {
     }
 });
 
-// --- H. EKSPOR EXCEL TAHUNAN (FORMAT DETAIL: JENIS SAMPAH & TOTAL) ---
+// --- H. EKSPOR EXCEL TAHUNAN ---
 app.get('/api/export/yearly', async (req, res) => {
     const targetYear = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
-
     try {
-        // 1. Ambil Data Setahun Penuh
         const { rows } = await pool.query(
             `SELECT * FROM waste_records 
              WHERE EXTRACT(YEAR FROM recorded_at) = $1
@@ -553,413 +483,21 @@ app.get('/api/export/yearly', async (req, res) => {
             [targetYear]
         );
 
-        // 2. Konfigurasi Kolom (Sama persis dengan Bulanan)
-        const areaList = ['Area Kantor', 'Area Parkir', 'Area Makan', 'Area Ruang Tunggu'];
-        const structure = {
-            organik: [
-                { header: 'Daun Kering', keywords: ['daun', 'kering'] },
-                { header: 'Sisa Makanan', keywords: ['makan', 'sisa'] }
-            ],
-            anorganik: [
-                { header: 'Kertas', keywords: ['kertas'] },
-                { header: 'Kardus', keywords: ['kardus'] },
-                { header: 'Plastik', keywords: ['plastik'] },
-                { header: 'Duplex', keywords: ['duplex'] },
-                { header: 'Kantong', keywords: ['kantong', 'kresek'] }
-            ],
-            residu: [
-                { header: 'Vial', keywords: ['vial'] },
-                { header: 'Botol', keywords: ['botol'] },
-                { header: 'Drum Vat', keywords: ['drum', 'vat'] },
-                { header: 'Residu', keywords: ['residu', 'lain'] }
-            ]
-        };
-
-        const monthNames = [
-            'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-            'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
-        ];
-
-        // 3. Proses Data (Kelompokkan per Bulan 0-11)
-        const reportData = {};
-        for (let m = 0; m < 12; m++) {
-            reportData[m] = {};
-            areaList.forEach(area => {
-                reportData[m][area] = {};
-                [...structure.organik, ...structure.anorganik, ...structure.residu].forEach(item => {
-                    reportData[m][area][item.header] = 0;
-                });
-            });
-        }
-
-        rows.forEach(row => {
-            const dateObj = new Date(row.recorded_at);
-            const monthIndex = dateObj.getMonth(); // 0 = Januari, 11 = Desember
-            
-            const dbArea = row.area_label ? row.area_label.toLowerCase() : '';
-            const dbItem = row.item_label ? row.item_label.toLowerCase() : '';
-            const weight = parseFloat(row.weight_kg) || 0;
-
-            let targetArea = null;
-            if (dbArea.includes('kantor')) targetArea = 'Area Kantor';
-            else if (dbArea.includes('parkir')) targetArea = 'Area Parkir';
-            else if (dbArea.includes('makan')) targetArea = 'Area Makan';
-            else if (dbArea.includes('tunggu')) targetArea = 'Area Ruang Tunggu';
-
-            if (targetArea) {
-                let matched = false;
-                const allItems = [...structure.organik, ...structure.anorganik, ...structure.residu];
-                for (const item of allItems) {
-                    if (item.keywords.some(k => dbItem.includes(k))) {
-                        reportData[monthIndex][targetArea][item.header] += weight;
-                        matched = true;
-                        break; 
-                    }
-                }
-                if (!matched) reportData[monthIndex][targetArea]['Residu'] += weight; 
-            }
-        });
-
-        // 4. Buat Excel
         const workbook = new excel.Workbook();
         const worksheet = workbook.addWorksheet(`Laporan Tahun ${targetYear}`);
-
-        // --- HEADER ---
-        const colsPerArea = 15;
-        const totalCols = 2 + (colsPerArea * areaList.length);
-
-        // Helper Huruf Kolom
-        const getColLetter = (n) => {
-            let s = "";
-            while(n >= 0) {
-                s = String.fromCharCode(n % 26 + 65) + s;
-                n = Math.floor(n / 26) - 1;
-            }
-            return s;
-        };
-        const lastColLetter = getColLetter(totalCols - 1);
-
-        worksheet.mergeCells(`A1:${lastColLetter}1`);
         worksheet.getCell('A1').value = `REKAMAN TIMBULAN SAMPAH - TAHUN ${targetYear}`;
-        worksheet.getCell('A1').font = { bold: true, size: 14 };
-        worksheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
-
-        let currentIdx = 3; 
         
-        worksheet.getCell('A3').value = 'No'; worksheet.mergeCells('A3:A5');
-        worksheet.getCell('B3').value = 'Bulan'; worksheet.mergeCells('B3:B5'); // Bedanya disini: BULAN
-
-        areaList.forEach(area => {
-            const startCol = currentIdx;
-            const endCol = currentIdx + colsPerArea - 1;
-            worksheet.mergeCells(3, startCol, 3, endCol);
-            worksheet.getCell(3, startCol).value = area.toUpperCase();
-            
-            // Baris 4
-            worksheet.mergeCells(4, currentIdx, 4, currentIdx + 1);
-            worksheet.getCell(4, currentIdx).value = 'Organik';
-            worksheet.getCell(4, currentIdx + 2).value = 'Total Organik';
-
-            const anorgStart = currentIdx + 3;
-            worksheet.mergeCells(4, anorgStart, 4, anorgStart + 4);
-            worksheet.getCell(4, anorgStart).value = 'Anorganik';
-            worksheet.getCell(4, anorgStart + 5).value = 'Total Anorganik';
-            worksheet.getCell(4, anorgStart + 6).value = 'Total Terkelola';
-
-            const residuStart = anorgStart + 7;
-            worksheet.mergeCells(4, residuStart, 4, residuStart + 3);
-            worksheet.getCell(4, residuStart).value = 'Sampah Tidak Terkelola';
-            worksheet.getCell(4, residuStart + 4).value = 'Total Tidak Terkelola'; 
-
-            // Baris 5 (Nama Item)
-            let subIdx = currentIdx;
-            structure.organik.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
-            worksheet.getCell(5, subIdx++).value = '(Kg)'; 
-            structure.anorganik.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
-            worksheet.getCell(5, subIdx++).value = '(Kg)'; 
-            worksheet.getCell(5, subIdx++).value = '(Kg)'; 
-            structure.residu.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
-            worksheet.getCell(5, subIdx++).value = '(Kg)'; 
-
-            currentIdx += colsPerArea;
-        });
-
-        // Styling Header
-        for (let r = 3; r <= 5; r++) {
-            const row = worksheet.getRow(r);
-            row.height = 30; // HEADER TINGGI
-            for (let c = 1; c <= totalCols; c++) {
-                const cell = row.getCell(c);
-                cell.font = { bold: true, size: 9 };
-                cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
-                
-                const colModulo = (c - 2) % colsPerArea; 
-                if (colModulo === 0 && c > 2) { 
-                     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF0000' } }; 
-                     cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; 
-                }
-            }
-        }
-
-        // 5. ISI DATA (Looping 12 Bulan)
-        const grandTotals = new Array(totalCols + 1).fill(0);
-
-        for (let m = 0; m < 12; m++) {
-            const rowValues = [m + 1, monthNames[m]]; // No, Nama Bulan
-            
-            areaList.forEach(area => {
-                const r = reportData[m][area];
-                let sumOrganik = 0; structure.organik.forEach(i => sumOrganik += (r[i.header] || 0));
-                let sumAnorganik = 0; structure.anorganik.forEach(i => sumAnorganik += (r[i.header] || 0));
-                let sumResidu = 0; structure.residu.forEach(i => sumResidu += (r[i.header] || 0));
-                const totalTerkelola = sumOrganik + sumAnorganik;
-
-                structure.organik.forEach(i => rowValues.push(r[i.header] || '-'));
-                rowValues.push(sumOrganik || '-');
-                structure.anorganik.forEach(i => rowValues.push(r[i.header] || '-'));
-                rowValues.push(sumAnorganik || '-');
-                rowValues.push(totalTerkelola || '-');
-                structure.residu.forEach(i => rowValues.push(r[i.header] || '-'));
-                rowValues.push(sumResidu || '-');
-            });
-
-            const excelRow = worksheet.getRow(m + 6);
-            excelRow.values = rowValues;
-            excelRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
-                cell.alignment = { horizontal: 'center' };
-                const val = cell.value;
-                if (typeof val === 'number') {
-                    grandTotals[colNumber] = (grandTotals[colNumber] || 0) + val;
-                }
-            });
-        }
-
-        // 6. FOOTER
-        const rowTotalKg = 12 + 6; // 12 bulan + 6 baris header
-        const rowTotalTon = rowTotalKg + 1;
-        const rowAvg = rowTotalKg + 2;
-
-        worksheet.getCell(`A${rowTotalKg}`).value = 'Total (kg/thn)';
-        worksheet.getCell(`A${rowTotalTon}`).value = 'Total (ton/thn)';
-        worksheet.getCell(`A${rowAvg}`).value = 'Rata-rata (kg/hari)';
-
-        const daysInYear = (targetYear % 4 === 0 && targetYear % 100 > 0) || targetYear % 400 === 0 ? 366 : 365;
-
-        for (let c = 3; c <= totalCols; c++) {
-            const totalVal = grandTotals[c] || 0;
-            worksheet.getCell(rowTotalKg, c).value = totalVal;
-            worksheet.getCell(rowTotalTon, c).value = (totalVal / 1000);
-            worksheet.getCell(rowTotalTon, c).numFmt = '0.000';
-            worksheet.getCell(rowAvg, c).value = (totalVal / daysInYear);
-            worksheet.getCell(rowAvg, c).numFmt = '0.00';
-        }
-
-        [rowTotalKg, rowTotalTon, rowAvg].forEach(r => {
-            const row = worksheet.getRow(r);
-            row.eachCell({ includeEmpty: true }, (cell) => {
-                cell.font = { bold: true };
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B2' } };
-                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
-            });
-        });
-
-        // Set Lebar Kolom
-        worksheet.getColumn(1).width = 5; 
-        worksheet.getColumn(2).width = 15; // Bulan butuh agak lebar
-        for(let i=3; i<=totalCols; i++) {
-            worksheet.getColumn(i).width = 17; // LEBAR 17 (Sama kayak bulanan)
-        }
-
-        // Kirim
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename=Laporan Timbulan Sampah Tahunan ${targetYear}.xlsx`);
+        res.setHeader('Content-Disposition', `attachment; filename=Laporan_Tahunan_${targetYear}.xlsx`);
         await workbook.xlsx.write(res);
         res.end();
-
     } catch (err) {
-        console.error('Error Excel Tahunan:', err);
         res.status(500).json({ message: 'Gagal export tahunan' });
     }
 });
 
-// Konfigurasi Font (Pakai Roboto yang baru didownload)
-// Konfigurasi Font (Kita pakai nama 'normal.ttf' agar seragam)
-const fonts = {
-  Helvetica: {
-    normal: 'Helvetica',
-    bold: 'Helvetica-Bold',
-    italics: 'Helvetica-Oblique',
-    bolditalics: 'Helvetica-BoldOblique'
-  }
-};
-const printer = new PdfPrinter(fonts);
-
-// --- 1. EXPORT PDF BULANAN (RINGKASAN) ---
-app.get('/api/export/pdf/monthly', async (req, res) => {
-  const targetMonth = req.query.month ? parseInt(req.query.month) : new Date().getMonth() + 1;
-  const targetYear = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
-
-  try {
-    const { rows } = await pool.query(
-      `SELECT * FROM waste_records 
-       WHERE EXTRACT(MONTH FROM recorded_at) = $1 AND EXTRACT(YEAR FROM recorded_at) = $2`,
-      [targetMonth, targetYear]
-    );
-
-    const docDefinition = generateSummaryPDF(rows, targetMonth, targetYear, 'monthly');
-    
-    const pdfDoc = printer.createPdfKitDocument(docDefinition);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename=Laporan_Ringkas_Bulan_${targetMonth}-${targetYear}.pdf`);
-    pdfDoc.pipe(res);
-    pdfDoc.end();
-
-  } catch (err) {
-    console.error('Error PDF Monthly:', err);
-    res.status(500).json({ message: 'Gagal membuat PDF Bulanan' });
-  }
-});
-
-// --- 2. EXPORT PDF TAHUNAN (RINGKASAN) ---
-app.get('/api/export/pdf/yearly', async (req, res) => {
-  const targetYear = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
-
-  try {
-    const { rows } = await pool.query(
-      `SELECT * FROM waste_records 
-       WHERE EXTRACT(YEAR FROM recorded_at) = $1`,
-      [targetYear]
-    );
-
-    const docDefinition = generateSummaryPDF(rows, null, targetYear, 'yearly');
-
-    const pdfDoc = printer.createPdfKitDocument(docDefinition);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename=Laporan Timbulan Sampah Tahun${targetYear}.pdf`);
-    pdfDoc.pipe(res);
-    pdfDoc.end();
-
-  } catch (err) {
-    console.error('Error PDF Yearly:', err);
-    res.status(500).json({ message: 'Gagal membuat PDF Tahunan' });
-  }
-});
-
-// --- FUNGSI GENERATOR PDF ---
-function generateSummaryPDF(rows, month, year, type) {
-    // 1. Olah Data
-    const summary = {
-      'Area Kantor': { organik: 0, anorganik: 0, residu: 0 },
-      'Area Parkir': { organik: 0, anorganik: 0, residu: 0 },
-      'Area Makan': { organik: 0, anorganik: 0, residu: 0 },
-      'Area Ruang Tunggu': { organik: 0, anorganik: 0, residu: 0 }
-    };
-
-    rows.forEach(row => {
-      const dbArea = row.area_label ? row.area_label.toLowerCase() : '';
-      const status = row.status ? row.status.trim() : '';
-      const weight = parseFloat(row.weight_kg) || 0;
-
-      let targetArea = null;
-      if (dbArea.includes('kantor')) targetArea = 'Area Kantor';
-      else if (dbArea.includes('parkir')) targetArea = 'Area Parkir';
-      else if (dbArea.includes('makan')) targetArea = 'Area Makan';
-      else if (dbArea.includes('tunggu')) targetArea = 'Area Ruang Tunggu';
-
-      if (targetArea) {
-        if (status === 'Organik Terpilah') summary[targetArea].organik += weight;
-        else if (status === 'Anorganik Terpilah') summary[targetArea].anorganik += weight;
-        else if (status === 'Tidak Terkelola') summary[targetArea].residu += weight;
-      }
-    });
-
-    // 2. Body Tabel
-    const tableBody = [];
-    tableBody.push([
-      { text: 'No', style: 'tableHeader' },
-      { text: 'Lokasi / Area', style: 'tableHeader', alignment: 'left' },
-      { text: 'Organik (Kg)', style: 'tableHeader' },
-      { text: 'Anorganik (Kg)', style: 'tableHeader' },
-      { text: 'Tidak Terkelola (Kg)', style: 'tableHeader' },
-      { text: 'Total (Kg)', style: 'tableHeader', fillColor: '#eeeeee' }
-    ]);
-
-    let no = 1;
-    let grandTotalOrganik = 0;
-    let grandTotalAnorganik = 0;
-    let grandTotalResidu = 0;
-
-    Object.keys(summary).forEach(area => {
-      const s = summary[area];
-      const totalArea = s.organik + s.anorganik + s.residu;
-      grandTotalOrganik += s.organik;
-      grandTotalAnorganik += s.anorganik;
-      grandTotalResidu += s.residu;
-
-      tableBody.push([
-        { text: no++, alignment: 'center' },
-        { text: area, alignment: 'left' },
-        { text: s.organik.toFixed(2), alignment: 'center' },
-        { text: s.anorganik.toFixed(2), alignment: 'center' },
-        { text: s.residu.toFixed(2), alignment: 'center' },
-        { text: totalArea.toFixed(2), alignment: 'center', bold: true }
-      ]);
-    });
-
-    const grandTotalAll = grandTotalOrganik + grandTotalAnorganik + grandTotalResidu;
-    tableBody.push([
-      { text: 'TOTAL KESELURUHAN', colSpan: 2, style: 'tableFooter', alignment: 'center' },
-      {},
-      { text: grandTotalOrganik.toFixed(2), style: 'tableFooter', alignment: 'center' },
-      { text: grandTotalAnorganik.toFixed(2), style: 'tableFooter', alignment: 'center' },
-      { text: grandTotalResidu.toFixed(2), style: 'tableFooter', alignment: 'center' },
-      { text: grandTotalAll.toFixed(2), style: 'tableFooter', alignment: 'center' }
-    ]);
-
-    // 3. Judul
-    const titleText = type === 'monthly' 
-        ? `LAPORAN RINGKASAN BULAN ${month}/${year}` 
-        : `LAPORAN RINGKASAN TAHUN ${year}`;
-
-    return {
-      pageSize: 'A4',
-      pageOrientation: 'landscape',
-      content: [
-        { text: 'REKAMAN TIMBULAN SAMPAH', style: 'header' },
-        { text: titleText, style: 'subheader' },
-        { text: '\n' },
-        {
-          table: {
-            headerRows: 1,
-            widths: ['auto', '*', '*', '*', '*', '*'],
-            body: tableBody
-          },
-          layout: {
-            fillColor: function (rowIndex) { return (rowIndex === 0) ? '#4CAF50' : null; }
-          }
-        },
-        { text: '\n\n' },
-        { text: `Dicetak pada: ${new Date().toLocaleString('id-ID')}`, style: 'small' }
-      ],
-      styles: {
-        header: { fontSize: 18, bold: true, alignment: 'center', margin: [0, 0, 0, 5] },
-        subheader: { fontSize: 12, bold: true, alignment: 'center', margin: [0, 0, 0, 20] },
-        tableHeader: { bold: true, fontSize: 11, color: 'white', alignment: 'center', margin: [0, 5, 0, 5] },
-        tableFooter: { bold: true, fontSize: 11, fillColor: '#dcedc8', margin: [0, 5, 0, 5] },
-        small: { fontSize: 8, italics: true, alignment: 'right', color: 'grey' }
-      },
-      // INI KUNCINYA: Gunakan Helvetica sebagai Default Font
-      defaultStyle: {
-        font: 'Helvetica'
-      }
-    };
-}
-// --- EXPORT APP (PENTING UNTUK VERCEL) ---
+// --- SERVER LISTEN ---
 if (require.main === module) {
     app.listen(PORT, () => console.log(`Server berjalan di http://localhost:${PORT}`));
 }
-
 module.exports = app;
