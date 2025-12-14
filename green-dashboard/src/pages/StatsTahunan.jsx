@@ -3,14 +3,13 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-const COLORS = ['#27ae60', '#f39c12', '#c0392b']; 
+// --- WARNA CHART ---
+const COLORS = ['#4CAF50', '#F44336']; 
 
 const generateYearOptions = () => {
   const currentYear = new Date().getFullYear();
   const years = [];
-  for (let i = currentYear; i >= 2023; i--) { 
-    years.push(i);
-  }
+  for (let i = currentYear; i >= 2023; i--) { years.push(i); }
   return years;
 };
 
@@ -31,22 +30,16 @@ function StatsTahunan() {
       setIsLoading(true);
       setErrorMessage('');
       const token = localStorage.getItem('adminToken');
-      if (!token) { navigate('/'); return; }
-
-      const params = { 
-        range: 'yearly',
-        year: selectedYear
-      }; 
+      
+      const params = { range: 'yearly', year: selectedYear }; 
       const headers = { 'Authorization': `Bearer ${token}` };
       
       try {
-        const statsRequest = axios.get('https://proyek-pencatatan-sampah.vercel.app/api/stats', { params, headers });
-        const recordsRequest = axios.get('https://proyek-pencatatan-sampah.vercel.app/api/records', { params, headers });
+        const baseURL = 'http://localhost:5000'; 
+        const statsRequest = axios.get(`${baseURL}/api/stats`, { params, headers });
+        const recordsRequest = axios.get(`${baseURL}/api/records`, { params, headers });
 
-        const [statsResponse, recordsResponse] = await Promise.all([
-          statsRequest,
-          recordsRequest
-        ]);
+        const [statsResponse, recordsResponse] = await Promise.all([statsRequest, recordsRequest]);
 
         setPieData(statsResponse.data);
         setTableData(recordsResponse.data);
@@ -54,7 +47,7 @@ function StatsTahunan() {
         setTotalWeight(newTotal);
         
       } catch (error) {
-        console.error('Error fetching yearly data:', error);
+        console.error(error);
         setErrorMessage('Gagal mengambil data statistik tahunan.');
       } finally {
         setIsLoading(false);
@@ -63,7 +56,17 @@ function StatsTahunan() {
     fetchData();
   }, [navigate, selectedYear]); 
 
-  const loadScript = (src) => { return new Promise((resolve) => { const s = document.createElement('script'); s.src = src; s.onload = resolve; document.body.appendChild(s); }); };
+  // --- LOGIKA PDF DETAIL (TAHUNAN) ---
+  const loadScript = (src) => {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`script[src="${src}"]`)) return resolve();
+      const script = document.createElement('script');
+      script.src = src;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error(`Failed to load script ${src}`));
+      document.body.appendChild(script);
+    });
+  };
 
   const handleExportPDF = async () => {
     setIsExporting(true);
@@ -71,128 +74,212 @@ function StatsTahunan() {
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js');
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js');
 
+      // 1. Struktur Item Detail
+      const itemStructure = {
+        organik: ['Daun Kering', 'Sisa Makanan'],
+        anorganik: ['Kertas', 'Kardus', 'Plastik', 'Duplex', 'Kantong'],
+        residu: ['Vial', 'Botol', 'Drum Vat', 'Residu']
+      };
+      const keywords = {
+        'Daun Kering': ['daun', 'kering'], 'Sisa Makanan': ['sisa', 'makan'],
+        'Kertas': ['kertas'], 'Kardus': ['kardus'], 'Plastik': ['plastik'], 'Duplex': ['duplex'], 'Kantong': ['kantong', 'kresek'],
+        'Vial': ['vial'], 'Botol': ['botol'], 'Drum Vat': ['drum', 'vat'], 'Residu': ['residu', 'lain']
+      };
+
+      const areaList = ['Area Kantor', 'Area Parkir', 'Area Makan', 'Area Ruang Tunggu'];
+      const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+      
+      // Inisialisasi Data per Bulan (0-11)
       const reportData = {};
-      const monthNames = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
       for (let m = 0; m < 12; m++) {
-        reportData[m] = { 'Area Kantor':{o:0,a:0,r:0}, 'Area Parkir':{o:0,a:0,r:0}, 'Area Makan':{o:0,a:0,r:0}, 'Area Ruang Tunggu':{o:0,a:0,r:0} };
+        reportData[m] = {};
+        areaList.forEach(area => {
+            reportData[m][area] = {};
+            [...itemStructure.organik, ...itemStructure.anorganik, ...itemStructure.residu].forEach(item => {
+                reportData[m][area][item] = 0;
+            });
+        });
       }
 
+      // Mapping Data Database ke Struktur Report
       tableData.forEach(row => {
         const dateObj = new Date(row.recorded_at);
-        const monthIndex = dateObj.getMonth(); 
-        let area = row.area_label || '';
-        let w = parseFloat(row.weight_kg) || 0;
-        let key = null;
-        if (area.toLowerCase().includes('kantor')) key = 'Area Kantor';
-        else if (area.toLowerCase().includes('parkir')) key = 'Area Parkir';
-        else if (area.toLowerCase().includes('makan')) key = 'Area Makan';
-        else if (area.toLowerCase().includes('tunggu')) key = 'Area Ruang Tunggu';
+        const monthIndex = dateObj.getMonth(); // 0 = Jan, 11 = Des
+        let area = row.area_label ? row.area_label.trim() : '';
+        const itemLabel = row.item_label ? row.item_label.toLowerCase() : '';
+        const weight = parseFloat(row.weight_kg) || 0;
 
-        if (key) {
-            if (row.status === 'Organik Terpilah') reportData[monthIndex][key].o += w;
-            else if (row.status === 'Anorganik Terpilah') reportData[monthIndex][key].a += w;
-            else reportData[monthIndex][key].r += w;
+        let targetAreaKey = null;
+        if (area.toLowerCase().includes('kantor')) targetAreaKey = 'Area Kantor';
+        else if (area.toLowerCase().includes('parkir')) targetAreaKey = 'Area Parkir';
+        else if (area.toLowerCase().includes('makan')) targetAreaKey = 'Area Makan';
+        else if (area.toLowerCase().includes('tunggu')) targetAreaKey = 'Area Ruang Tunggu';
+
+        if (targetAreaKey && reportData[monthIndex]) {
+            let matched = false;
+            for (const [header, keys] of Object.entries(keywords)) {
+                if (keys.some(k => itemLabel.includes(k))) {
+                    reportData[monthIndex][targetAreaKey][header] += weight;
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) reportData[monthIndex][targetAreaKey]['Residu'] += weight;
         }
       });
 
-      const totals = { k_o:0, k_a:0, k_r:0, k_t:0, p_o:0, p_a:0, p_r:0, p_t:0, m_o:0, m_a:0, m_r:0, m_t:0, t_o:0, t_a:0, t_r:0, t_t:0, grand:0 };
-      const body = [];
-      // HEADER 1-3 SAMA SEPERTI BULANAN (Ganti Tanggal jadi Bulan)
-      // (Saya copy struktur header dari bulanan tapi ganti text)
-      const headerRow1 = [
-        { text: 'No', rowSpan: 3, style: 'tableHeader' },
-        { text: 'Bulan', rowSpan: 3, style: 'tableHeader' },
-        { text: 'Area Kantor', colSpan: 4, style: 'tableHeader' }, {}, {}, {},
-        { text: 'Area Parkir', colSpan: 4, style: 'tableHeader' }, {}, {}, {},
-        { text: 'Area Makan', colSpan: 4, style: 'tableHeader' }, {}, {}, {},
-        { text: 'Area Ruang Tunggu', colSpan: 4, style: 'tableHeader' }, {}, {}, {},
-        { text: 'TOTAL', rowSpan: 3, style: 'tableHeader' } 
-      ];
-      const headerRow2 = [ {}, {}, { text: 'Org', style: 'tableHeader' }, { text: 'Anorg', style: 'tableHeader' }, { text: 'Lain', style: 'tableHeader' }, { text: 'Jml', style: 'tableHeader' }, { text: 'Org', style: 'tableHeader' }, { text: 'Anorg', style: 'tableHeader' }, { text: 'Lain', style: 'tableHeader' }, { text: 'Jml', style: 'tableHeader' }, { text: 'Org', style: 'tableHeader' }, { text: 'Anorg', style: 'tableHeader' }, { text: 'Lain', style: 'tableHeader' }, { text: 'Jml', style: 'tableHeader' }, { text: 'Org', style: 'tableHeader' }, { text: 'Anorg', style: 'tableHeader' }, { text: 'Lain', style: 'tableHeader' }, { text: 'Jml', style: 'tableHeader' }, {} ];
-      const headerRow3 = [{},{}, {},{},{},{}, {},{},{},{}, {},{},{},{}, {},{},{},{}, {}];
-      body.push(headerRow1); body.push(headerRow2); body.push(headerRow3);
+      // 2. Generate Konten PDF (Per Area)
+      const content = [];
+      content.push({ text: `LAPORAN REKAPITULASI SAMPAH TAHUNAN - ${selectedYear}`, style: 'header' });
+      content.push({ text: 'PT. Dexa Medica Palembang', style: 'subheader' });
 
-      for (let m = 0; m < 12; m++) {
-          const r = reportData[m];
-          const kt=r['Area Kantor'].o+r['Area Kantor'].a+r['Area Kantor'].r;
-          const pt=r['Area Parkir'].o+r['Area Parkir'].a+r['Area Parkir'].r;
-          const mt=r['Area Makan'].o+r['Area Makan'].a+r['Area Makan'].r;
-          const tt=r['Area Ruang Tunggu'].o+r['Area Ruang Tunggu'].a+r['Area Ruang Tunggu'].r;
-          const dt=kt+pt+mt+tt;
+      areaList.forEach((area, index) => {
+          content.push({ text: area.toUpperCase(), style: 'areaTitle', margin: [0, 15, 0, 5] });
 
-          totals.k_o+=r['Area Kantor'].o; totals.k_a+=r['Area Kantor'].a; totals.k_r+=r['Area Kantor'].r; totals.k_t+=kt;
-          totals.p_o+=r['Area Parkir'].o; totals.p_a+=r['Area Parkir'].a; totals.p_r+=r['Area Parkir'].r; totals.p_t+=pt;
-          totals.m_o+=r['Area Makan'].o; totals.m_a+=r['Area Makan'].a; totals.m_r+=r['Area Makan'].r; totals.m_t+=mt;
-          totals.t_o+=r['Area Ruang Tunggu'].o; totals.t_a+=r['Area Ruang Tunggu'].a; totals.t_r+=r['Area Ruang Tunggu'].r; totals.t_t+=tt;
-          totals.grand += dt;
+          const body = [];
+          
+          // Row 1: Header Kategori
+          const row1 = [
+              { text: 'No', rowSpan: 2, style: 'tableHeader', margin: [0, 5, 0, 0] },
+              { text: 'Bulan', rowSpan: 2, style: 'tableHeader', margin: [0, 5, 0, 0] }, // Ubah Tgl jadi Bulan
+              { text: 'Organik', colSpan: itemStructure.organik.length + 1, style: 'catHeader', fillColor: '#FFFF00' },
+              ...Array(itemStructure.organik.length).fill({}), 
+              { text: 'Anorganik', colSpan: itemStructure.anorganik.length + 1, style: 'catHeader', fillColor: '#FFFF00' },
+              ...Array(itemStructure.anorganik.length).fill({}),
+              { text: 'Residu', colSpan: itemStructure.residu.length + 1, style: 'catHeader', fillColor: '#FFFF00' },
+              ...Array(itemStructure.residu.length).fill({}),
+              { text: 'TOTAL', rowSpan: 2, style: 'tableHeader', margin: [0, 5, 0, 0] }
+          ];
+          
+          // Row 2: Header Item Name
+          const row2 = [ {}, {} ];
+          itemStructure.organik.forEach(i => row2.push({ text: i, style: 'itemHeader' }));
+          row2.push({ text: 'Jml', style: 'itemHeaderBold' }); 
+          itemStructure.anorganik.forEach(i => row2.push({ text: i, style: 'itemHeader' }));
+          row2.push({ text: 'Jml', style: 'itemHeaderBold' }); 
+          itemStructure.residu.forEach(i => row2.push({ text: i, style: 'itemHeader' }));
+          row2.push({ text: 'Jml', style: 'itemHeaderBold' }); 
+          row2.push({}); // Spacer Grand Total
 
-          body.push([
-            { text: (m+1).toString(), style: 'tableCell' }, { text: monthNames[m], style: 'tableCell' },
-            { text: r['Area Kantor'].o||'-', style:'tableCell' }, { text: r['Area Kantor'].a||'-', style:'tableCell' }, { text: r['Area Kantor'].r||'-', style:'tableCell' }, { text: kt||'-', style:'tableBold' },
-            { text: r['Area Parkir'].o||'-', style:'tableCell' }, { text: r['Area Parkir'].a||'-', style:'tableCell' }, { text: r['Area Parkir'].r||'-', style:'tableCell' }, { text: pt||'-', style:'tableBold' },
-            { text: r['Area Makan'].o||'-', style:'tableCell' }, { text: r['Area Makan'].a||'-', style:'tableCell' }, { text: r['Area Makan'].r||'-', style:'tableCell' }, { text: mt||'-', style:'tableBold' },
-            { text: r['Area Ruang Tunggu'].o||'-', style:'tableCell' }, { text: r['Area Ruang Tunggu'].a||'-', style:'tableCell' }, { text: r['Area Ruang Tunggu'].r||'-', style:'tableCell' }, { text: tt||'-', style:'tableBold' },
-            { text: dt.toFixed(2), style: 'tableBold' }
-          ]);
-      }
+          body.push(row1);
+          body.push(row2);
 
-      const daysInYear = (selectedYear%4===0) ? 366 : 365;
-      // Footer Kg
-      body.push([
-          { text:'Total (kg)', colSpan:2, style:'bold', fillColor:'#ffe0b2' }, {},
-          { text: totals.k_o.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.k_a.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.k_r.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.k_t.toFixed(2), style:'bold', fillColor:'#ffe0b2' },
-          { text: totals.p_o.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.p_a.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.p_r.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.p_t.toFixed(2), style:'bold', fillColor:'#ffe0b2' },
-          { text: totals.m_o.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.m_a.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.m_r.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.m_t.toFixed(2), style:'bold', fillColor:'#ffe0b2' },
-          { text: totals.t_o.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.t_a.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.t_r.toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: totals.t_t.toFixed(2), style:'bold', fillColor:'#ffe0b2' },
-          { text: totals.grand.toFixed(2), style:'bold', fillColor:'#ffe0b2' }
-      ]);
-      // Footer Ton
-      body.push([
-          { text:'Total (ton)', colSpan:2, style:'bold', fillColor:'#ffccbc' }, {},
-          { text: (totals.k_o/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.k_a/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.k_r/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.k_t/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' },
-          { text: (totals.p_o/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.p_a/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.p_r/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.p_t/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' },
-          { text: (totals.m_o/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.m_a/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.m_r/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.m_t/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' },
-          { text: (totals.t_o/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.t_a/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.t_r/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }, { text: (totals.t_t/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' },
-          { text: (totals.grand/1000).toFixed(3), style:'bold', fillColor:'#ffccbc' }
-      ]);
-      // Footer Avg
-      body.push([
-          { text:'Rata-rata (kg/hari)', colSpan:2, style:'bold', fillColor:'#ffe0b2' }, {},
-          { text: (totals.k_o/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.k_a/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.k_r/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.k_t/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' },
-          { text: (totals.p_o/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.p_a/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.p_r/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.p_t/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' },
-          { text: (totals.m_o/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.m_a/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.m_r/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.m_t/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' },
-          { text: (totals.t_o/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.t_a/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.t_r/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }, { text: (totals.t_t/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' },
-          { text: (totals.grand/daysInYear).toFixed(2), style:'bold', fillColor:'#ffe0b2' }
-      ]);
+          // Isi Data (Looping 12 Bulan)
+          const colTotals = new Array(row2.length).fill(0); 
 
+          for (let m = 0; m < 12; m++) {
+              const r = reportData[m][area];
+              const rowData = [ 
+                  { text: (m+1).toString(), style: 'tableCell' }, 
+                  { text: monthNames[m], style: 'tableCell' } // Nama Bulan
+              ];
+              let colIdx = 2; // Start after No & Bulan
+
+              // Organik
+              let subOrg = 0;
+              itemStructure.organik.forEach(i => {
+                  const val = r[i] || 0; subOrg += val;
+                  rowData.push({ text: val || '-', style: 'tableCell' });
+                  colTotals[colIdx++] += val;
+              });
+              rowData.push({ text: subOrg || '-', style: 'tableBold' }); 
+              colTotals[colIdx++] += subOrg;
+
+              // Anorganik
+              let subAnorg = 0;
+              itemStructure.anorganik.forEach(i => {
+                  const val = r[i] || 0; subAnorg += val;
+                  rowData.push({ text: val || '-', style: 'tableCell' });
+                  colTotals[colIdx++] += val;
+              });
+              rowData.push({ text: subAnorg || '-', style: 'tableBold' });
+              colTotals[colIdx++] += subAnorg;
+
+              // Residu
+              let subRes = 0;
+              itemStructure.residu.forEach(i => {
+                  const val = r[i] || 0; subRes += val;
+                  rowData.push({ text: val || '-', style: 'tableCell' });
+                  colTotals[colIdx++] += val;
+              });
+              rowData.push({ text: subRes || '-', style: 'tableBold' });
+              colTotals[colIdx++] += subRes;
+
+              // Grand Total Bulanan
+              const monthlyTotal = subOrg + subAnorg + subRes;
+              rowData.push({ text: monthlyTotal.toFixed(1), style: 'tableBold' });
+              colTotals[colIdx++] += monthlyTotal;
+
+              body.push(rowData);
+          }
+
+          // --- FOOTER (3 BARIS) ---
+          const daysInYear = (selectedYear % 4 === 0 && selectedYear % 100 > 0) || selectedYear % 400 === 0 ? 366 : 365;
+
+          // 1. Total (kg/thn)
+          const footerRowKg = [ { text: 'Total (kg/thn)', colSpan: 2, style: 'footerLabel', fillColor: '#FFE0B2' }, {} ];
+          for(let c=2; c<colTotals.length; c++) {
+              footerRowKg.push({ text: colTotals[c].toFixed(1), style: 'tableBold', fillColor: '#FFE0B2' });
+          }
+          body.push(footerRowKg);
+
+          // 2. Total (ton/thn)
+          const footerRowTon = [ { text: 'Total (ton/thn)', colSpan: 2, style: 'footerLabel', fillColor: '#FFE0B2' }, {} ];
+          for(let c=2; c<colTotals.length; c++) {
+              const valTon = colTotals[c] / 1000;
+              footerRowTon.push({ text: valTon.toFixed(3), style: 'tableBold', fillColor: '#FFE0B2' });
+          }
+          body.push(footerRowTon);
+
+          // 3. Rata-rata (kg/hari)
+          const footerRowAvg = [ { text: 'Rata-rata (kg/hr)', colSpan: 2, style: 'footerLabel', fillColor: '#FFE0B2' }, {} ];
+          for(let c=2; c<colTotals.length; c++) {
+              const valAvg = colTotals[c] / daysInYear;
+              footerRowAvg.push({ text: valAvg.toFixed(2), style: 'tableBold', fillColor: '#FFE0B2' });
+          }
+          body.push(footerRowAvg);
+
+          // Render Table
+          content.push({
+              style: 'tableExample',
+              table: {
+                  headerRows: 2,
+                  widths: Array(body[0].length).fill('*'),
+                  body: body
+              },
+              layout: { fillColor: function (rowIndex) { return (rowIndex < 2) ? '#eeeeee' : null; } }
+          });
+          
+          if(index < areaList.length - 1) content.push({ text: '', pageBreak: 'after' });
+      });
+
+      // 3. Config PDF
       const docDefinition = {
         pageOrientation: 'landscape',
         pageSize: 'A4',
-        content: [
-          { text: `REKAMAN TIMBULAN SAMPAH - TAHUN ${selectedYear}`, style: 'header' },
-          { text: 'PT. Dexa Medica Palembang', style: 'subheader' },
-          {
-            style: 'tableExample',
-            table: {
-              headerRows: 3,
-              widths: [15, 30,  22,22,22,25,  22,22,22,25,  22,22,22,25,  22,22,22,25, 35],
-              body: body
-            },
-            layout: { fillColor: function (rowIndex) { return (rowIndex < 3 || rowIndex >= body.length - 3) ? '#f1c40f' : null; } }
-          }
-        ],
+        content: content,
         styles: {
-          header: { fontSize: 14, bold: true, margin: [0, 0, 0, 5], alignment: 'center' },
-          subheader: { fontSize: 10, margin: [0, 0, 0, 10], alignment: 'center' },
-          tableHeader: { bold: true, fontSize: 6, color: 'black', alignment: 'center' },
-          tableCell: { fontSize: 6, alignment: 'center' },
-          tableBold: { fontSize: 6, bold: true, alignment: 'center' }
+          header: { fontSize: 14, bold: true, alignment: 'center', margin: [0,0,0,5] },
+          subheader: { fontSize: 10, alignment: 'center', margin: [0,0,0,10] },
+          areaTitle: { fontSize: 12, bold: true, color: '#1D5D50', decoration: 'underline' },
+          tableHeader: { bold: true, fontSize: 8, alignment: 'center' },
+          catHeader: { bold: true, fontSize: 8, alignment: 'center', color: 'black' },
+          itemHeader: { fontSize: 7, alignment: 'center', italics: true },
+          itemHeaderBold: { fontSize: 7, bold: true, alignment: 'center' },
+          tableCell: { fontSize: 8, alignment: 'center' },
+          tableBold: { fontSize: 8, bold: true, alignment: 'center' },
+          footerLabel: { fontSize: 7, bold: true, alignment: 'left' }
         }
       };
 
-      window.pdfMake.createPdf(docDefinition).download(`Laporan Timbulan Sampah Tahun ${selectedYear}.pdf`);
+      window.pdfMake.createPdf(docDefinition).download(`Laporan_Tahunan_${selectedYear}.pdf`);
 
-    } catch (error) { console.error(error); alert('Gagal membuat PDF'); } finally { setIsExporting(false); }
+    } catch (error) { 
+        console.error(error); 
+        alert('Gagal membuat PDF. Coba lagi.'); 
+    } finally { 
+        setIsExporting(false); 
+    }
   };
 
   const handleExportXLSX = async () => {
@@ -200,7 +287,8 @@ function StatsTahunan() {
     setErrorMessage('');
     const token = localStorage.getItem('adminToken');
     try {
-      const response = await axios.get('https://proyek-pencatatan-sampah.vercel.app/api/export/yearly', {
+      const baseURL = 'http://localhost:5000'; 
+      const response = await axios.get(`${baseURL}/api/export/yearly`, {
         headers: { 'Authorization': `Bearer ${token}` },
         params: { year: selectedYear },
         responseType: 'blob', 
@@ -208,7 +296,7 @@ function StatsTahunan() {
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      let filename = `Laporan Timbulan Sampah Tahun ${selectedYear}.xlsx`;
+      let filename = `Laporan_Tahunan_${selectedYear}.xlsx`;
       link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
@@ -219,7 +307,9 @@ function StatsTahunan() {
 
   return (
     <div className="content-section">
-      <h2>Statistik Tahunan</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <h2>Statistik Tahunan</h2>
+      </div>
 
       <div style={styles.filterContainer}>
         <div style={styles.filterGroup}>
@@ -232,34 +322,53 @@ function StatsTahunan() {
       
       {isLoading ? ( <p>Memuat data...</p> )
       : errorMessage ? ( <p style={{ color: 'red' }}>{errorMessage}</p> )
-      : totalWeight === 0 ? ( <p>Belum ada data untuk periode ini.</p> )
+      : totalWeight === 0 ? ( <div style={{padding: '20px', backgroundColor: '#f5f5f5', borderRadius: '5px'}}>Belum ada data untuk periode ini.</div> )
       : (
-        <div style={{ width: '100%', height: 300, marginBottom: '2rem' }}>
-          <ResponsiveContainer>
-             <PieChart>
-               <Pie data={pieData} cx="50%" cy="50%" labelLine={false} label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} fill="#8884d8" dataKey="value">
-                 {pieData.map((entry, index) => ( <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} /> ))}
-               </Pie>
-               <Tooltip formatter={(value) => `${value.toFixed(2)} Kg`} />
-               <Legend />
-             </PieChart>
-           </ResponsiveContainer>
-         </div>
+        <div style={{ width: '100%', marginBottom: '2rem', backgroundColor: 'white', padding: '1rem', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+          <h3 style={{textAlign: 'center', marginBottom: '10px', color: '#555'}}>Persentase Pengelolaan</h3>
+          <div style={{ width: '100%', height: 350 }}>
+            <ResponsiveContainer>
+              <PieChart>
+                <Pie 
+                    data={pieData} 
+                    cx="50%" cy="50%" 
+                    labelLine={false} 
+                    label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`} 
+                    outerRadius={100} 
+                    fill="#8884d8" 
+                    dataKey="value"
+                >
+                  {pieData.map((entry, index) => ( <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} /> ))}
+                </Pie>
+                <Tooltip formatter={(value) => `${value.toFixed(2)} Kg`} />
+                <Legend verticalAlign="bottom" height={36}/>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div style={{textAlign: 'center', marginTop: '10px', fontWeight: 'bold', color: '#333'}}>
+             Total: <span style={{color: '#27ae60'}}>{totalWeight.toFixed(2)} Kg</span>
+          </div>
+        </div>
        )}
 
       {!isLoading && (
         <div style={styles.previewContainer}>
           <div style={styles.tableHeaderContainer}>
-            <h3 style={styles.previewTitle}>Data Mentah (Tahun Ini)</h3>
+            <div style={{display: 'flex', flexDirection:'column'}}>
+                <h3 style={styles.previewTitle}>Data Mentah (Tahun Ini)</h3>
+                <span style={{ fontSize: '0.9rem', color: '#1D5D50', fontWeight: 'bold' }}>Total: {totalWeight.toFixed(2)} Kg</span>
+            </div>
+            
             <div style={{ display: 'flex', gap: '10px' }}>
                 <button onClick={handleExportXLSX} style={styles.exportButtonXLSX} disabled={isExporting}>
-                {isExporting ? '...' : 'Ekspor Excel'}
+                  {isExporting ? '...' : 'Ekspor Excel'}
                 </button>
                 <button onClick={handleExportPDF} style={styles.exportButtonPDF} disabled={isExporting}>
-                {isExporting ? '...' : 'Ekspor PDF'}
+                  {isExporting ? '...' : 'Ekspor PDF (Detail)'}
                 </button>
             </div>
           </div>
+          
           <div style={styles.tableWrapper}>
             <table style={styles.table}>
               <thead>
