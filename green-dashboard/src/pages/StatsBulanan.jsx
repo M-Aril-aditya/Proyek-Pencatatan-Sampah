@@ -43,7 +43,7 @@ function StatsBulanan() {
       const headers = { 'Authorization': `Bearer ${token}` };
       
       try {
-        const baseURL = 'http://localhost:5000'; 
+        const baseURL = 'https://proyek-pencatatan-sampah.vercel.app';
         const statsRequest = axios.get(`${baseURL}/api/stats`, { params, headers });
         const recordsRequest = axios.get(`${baseURL}/api/records`, { params, headers });
 
@@ -294,7 +294,7 @@ function StatsBulanan() {
     setErrorMessage('');
     const token = localStorage.getItem('adminToken');
     try {
-      const baseURL = 'http://localhost:5000'; 
+      const baseURL = 'https://proyek-pencatatan-sampah.vercel.app'; 
       const response = await axios.get(`${baseURL}/api/export/monthly`, {
         headers: { 'Authorization': `Bearer ${token}` },
         params: { month: selectedMonth, year: selectedYear },

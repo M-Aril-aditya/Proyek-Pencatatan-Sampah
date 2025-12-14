@@ -77,8 +77,8 @@ function UploadCSV() {
       const token = localStorage.getItem('adminToken');
       // if (!token) { ... } // Logic auth opsional
 
-      // --- Gunakan localhost:5000 untuk testing fitur baru ---
-      const baseURL = 'http://localhost:5000'; 
+      
+      const baseURL = 'https://proyek-pencatatan-sampah.vercel.app'; 
       
       const response = await axios.post(`${baseURL}/api/upload`, formData, {
         headers: {

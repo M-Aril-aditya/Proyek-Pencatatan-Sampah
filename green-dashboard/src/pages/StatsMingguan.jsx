@@ -67,7 +67,7 @@ function StatsMingguan() {
       const headers = { 'Authorization': `Bearer ${token}` };
       
       try {
-        const baseURL = 'http://localhost:5000'; 
+        const baseURL = 'https://proyek-pencatatan-sampah.vercel.app';
         
         const statsRequest = axios.get(`${baseURL}/api/stats`, { params, headers });
         const recordsRequest = axios.get(`${baseURL}/api/records`, { params, headers });
