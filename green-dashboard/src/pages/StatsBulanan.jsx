@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -33,12 +33,20 @@ function StatsBulanan() {
   const [selectedYear, setSelectedYear] = useState(jsDate.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(jsDate.getMonth() + 1); 
 
+  // --- STATE BARU UNTUK FILTER TABEL ---
+  const [filterArea, setFilterArea] = useState('Semua');
+  const [filterItem, setFilterItem] = useState('Semua');
+
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
       setErrorMessage('');
       const token = localStorage.getItem('adminToken');
       
+      // Reset filter saat ganti bulan/tahun
+      setFilterArea('Semua');
+      setFilterItem('Semua');
+
       const params = { range: 'monthly', year: selectedYear, month: selectedMonth }; 
       const headers = { 'Authorization': `Bearer ${token}` };
       
@@ -64,7 +72,28 @@ function StatsBulanan() {
     fetchData();
   }, [navigate, selectedYear, selectedMonth]); 
 
-  // --- LOGIKA PDF (DIPECAH PER AREA + TOTAL TON & RATA-RATA) ---
+  // --- LOGIKA FILTER (BARU) ---
+  // 1. Ambil list unik untuk Dropdown
+  const uniqueAreas = useMemo(() => {
+    const areas = tableData.map(row => row.area_label).filter(Boolean);
+    return ['Semua', ...new Set(areas)];
+  }, [tableData]);
+
+  const uniqueItems = useMemo(() => {
+    const items = tableData.map(row => row.item_label).filter(Boolean);
+    return ['Semua', ...new Set(items)];
+  }, [tableData]);
+
+  // 2. Filter Data Tabel
+  const filteredData = useMemo(() => {
+    return tableData.filter(row => {
+      const areaMatch = filterArea === 'Semua' || row.area_label === filterArea;
+      const itemMatch = filterItem === 'Semua' || row.item_label === filterItem;
+      return areaMatch && itemMatch;
+    });
+  }, [tableData, filterArea, filterItem]);
+
+  // --- LOGIKA PDF (CLIENT SIDE) ---
   const loadScript = (src) => {
     return new Promise((resolve, reject) => {
       if (document.querySelector(`script[src="${src}"]`)) return resolve();
@@ -82,7 +111,6 @@ function StatsBulanan() {
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js');
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js');
 
-      // 1. Struktur Item Detail
       const itemStructure = {
         organik: ['Daun Kering', 'Sisa Makanan'],
         anorganik: ['Kertas', 'Kardus', 'Plastik', 'Duplex', 'Kantong'],
@@ -97,7 +125,6 @@ function StatsBulanan() {
       const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
       const areaList = ['Area Kantor', 'Area Parkir', 'Area Makan', 'Area Ruang Tunggu'];
       
-      // Persiapkan Data
       const reportData = {};
       for (let d = 1; d <= daysInMonth; d++) {
         reportData[d] = {};
@@ -135,17 +162,14 @@ function StatsBulanan() {
         }
       });
 
-      // 2. Generate Konten PDF
       const content = [];
       content.push({ text: `LAPORAN TIMBULAN SAMPAH - BULAN ${selectedMonth}/${selectedYear}`, style: 'header' });
       content.push({ text: 'PT. Dexa Medica Palembang', style: 'subheader' });
 
       areaList.forEach((area, index) => {
           content.push({ text: area.toUpperCase(), style: 'areaTitle', margin: [0, 15, 0, 5] });
-
           const body = [];
           
-          // Row 1: Header Kategori
           const row1 = [
               { text: 'Tgl', rowSpan: 2, style: 'tableHeader', margin: [0, 5, 0, 0] },
               { text: 'Organik', colSpan: itemStructure.organik.length + 1, style: 'catHeader', fillColor: '#FFFF00' },
@@ -157,7 +181,6 @@ function StatsBulanan() {
               { text: 'TOTAL', rowSpan: 2, style: 'tableHeader', margin: [0, 5, 0, 0] }
           ];
           
-          // Row 2: Header Item Name
           const row2 = [ {} ];
           itemStructure.organik.forEach(i => row2.push({ text: i, style: 'itemHeader' }));
           row2.push({ text: 'Jml', style: 'itemHeaderBold' }); 
@@ -165,20 +188,18 @@ function StatsBulanan() {
           row2.push({ text: 'Jml', style: 'itemHeaderBold' }); 
           itemStructure.residu.forEach(i => row2.push({ text: i, style: 'itemHeader' }));
           row2.push({ text: 'Jml', style: 'itemHeaderBold' }); 
-          row2.push({}); // Spacer Grand Total
+          row2.push({}); 
 
           body.push(row1);
           body.push(row2);
 
-          // Isi Data
-          const colTotals = new Array(row2.length).fill(0); // Index 0 is Tgl
+          const colTotals = new Array(row2.length).fill(0); 
 
           for (let d = 1; d <= daysInMonth; d++) {
               const r = reportData[d][area];
               const rowData = [ { text: d.toString(), style: 'tableCell' } ];
               let colIdx = 1;
 
-              // Organik
               let subOrg = 0;
               itemStructure.organik.forEach(i => {
                   const val = r[i] || 0; subOrg += val;
@@ -188,7 +209,6 @@ function StatsBulanan() {
               rowData.push({ text: subOrg || '-', style: 'tableBold' }); 
               colTotals[colIdx++] += subOrg;
 
-              // Anorganik
               let subAnorg = 0;
               itemStructure.anorganik.forEach(i => {
                   const val = r[i] || 0; subAnorg += val;
@@ -198,7 +218,6 @@ function StatsBulanan() {
               rowData.push({ text: subAnorg || '-', style: 'tableBold' });
               colTotals[colIdx++] += subAnorg;
 
-              // Residu
               let subRes = 0;
               itemStructure.residu.forEach(i => {
                   const val = r[i] || 0; subRes += val;
@@ -208,7 +227,6 @@ function StatsBulanan() {
               rowData.push({ text: subRes || '-', style: 'tableBold' });
               colTotals[colIdx++] += subRes;
 
-              // Grand Total
               const dailyTotal = subOrg + subAnorg + subRes;
               rowData.push({ text: dailyTotal.toFixed(1), style: 'tableBold' });
               colTotals[colIdx++] += dailyTotal;
@@ -216,35 +234,26 @@ function StatsBulanan() {
               body.push(rowData);
           }
 
-          // --- BAGIAN FOOTER (3 BARIS) ---
-          
-          // 1. Total (kg/bln)
           const footerRowKg = [ { text: 'Total (kg/bln)', style: 'footerLabel', fillColor: '#FFE0B2' } ];
           for(let c=1; c<colTotals.length; c++) {
               footerRowKg.push({ text: colTotals[c].toFixed(1), style: 'tableBold', fillColor: '#FFE0B2' });
           }
           body.push(footerRowKg);
 
-          // 2. Total (ton/bln)
           const footerRowTon = [ { text: 'Total (ton/bln)', style: 'footerLabel', fillColor: '#FFE0B2' } ];
           for(let c=1; c<colTotals.length; c++) {
-              // Rumus: Total Kg / 1000
               const valTon = colTotals[c] / 1000;
-              // Tampilkan 3 desimal (contoh: 0.010)
               footerRowTon.push({ text: valTon.toFixed(3), style: 'tableBold', fillColor: '#FFE0B2' });
           }
           body.push(footerRowTon);
 
-          // 3. Rata-rata (kg/hari)
           const footerRowAvg = [ { text: 'Rata-rata (kg/hr)', style: 'footerLabel', fillColor: '#FFE0B2' } ];
           for(let c=1; c<colTotals.length; c++) {
-              // Rumus: Total Kg / Jumlah Hari
               const valAvg = colTotals[c] / daysInMonth;
               footerRowAvg.push({ text: valAvg.toFixed(2), style: 'tableBold', fillColor: '#FFE0B2' });
           }
           body.push(footerRowAvg);
 
-          // Masukkan Tabel
           content.push({
               style: 'tableExample',
               table: {
@@ -260,7 +269,6 @@ function StatsBulanan() {
           if(index < areaList.length - 1) content.push({ text: '', pageBreak: 'after' });
       });
 
-      // 3. Config PDF
       const docDefinition = {
         pageOrientation: 'landscape',
         pageSize: 'A4',
@@ -275,7 +283,7 @@ function StatsBulanan() {
           itemHeaderBold: { fontSize: 7, bold: true, alignment: 'center' },
           tableCell: { fontSize: 8, alignment: 'center' },
           tableBold: { fontSize: 8, bold: true, alignment: 'center' },
-          footerLabel: { fontSize: 7, bold: true, alignment: 'left' } // Font agak kecil agar muat di kolom pertama
+          footerLabel: { fontSize: 7, bold: true, alignment: 'left' }
         }
       };
 
@@ -289,12 +297,14 @@ function StatsBulanan() {
     }
   };
 
+  // --- EXCEL EXPORT (HIT BACKEND) ---
   const handleExportXLSX = async () => {
     setIsExporting(true);
     setErrorMessage('');
     const token = localStorage.getItem('adminToken');
     try {
       const baseURL = 'https://proyek-pencatatan-sampah.vercel.app'; 
+      // Menggunakan route baru yang sudah kita perbaiki
       const response = await axios.get(`${baseURL}/api/export/monthly`, {
         headers: { 'Authorization': `Bearer ${token}` },
         params: { month: selectedMonth, year: selectedYear },
@@ -318,6 +328,7 @@ function StatsBulanan() {
         <h2>Statistik Bulanan</h2>
       </div>
 
+      {/* FILTER TAHUN & BULAN */}
       <div style={styles.filterContainer}>
         <div style={styles.filterGroup}>
           <label style={styles.filterLabel}>Tahun:</label>
@@ -343,13 +354,13 @@ function StatsBulanan() {
             <ResponsiveContainer>
                <PieChart>
                  <Pie 
-                    data={pieData} 
-                    cx="50%" cy="50%" 
-                    labelLine={false} 
-                    label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`} 
-                    outerRadius={100} 
-                    fill="#8884d8" 
-                    dataKey="value"
+                   data={pieData} 
+                   cx="50%" cy="50%" 
+                   labelLine={false} 
+                   label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`} 
+                   outerRadius={100} 
+                   fill="#8884d8" 
+                   dataKey="value"
                  >
                    {pieData.map((entry, index) => ( <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} /> ))}
                  </Pie>
@@ -369,7 +380,9 @@ function StatsBulanan() {
           <div style={styles.tableHeaderContainer}>
             <div style={{display: 'flex', flexDirection:'column'}}>
                 <h3 style={styles.previewTitle}>Data Mentah (Bulan Ini)</h3>
-                <span style={{ fontSize: '0.9rem', color: '#1D5D50', fontWeight: 'bold' }}>Total: {totalWeight.toFixed(2)} Kg</span>
+                <span style={{ fontSize: '0.9rem', color: '#1D5D50', fontWeight: 'bold' }}>
+                  Total (Filtered): {filteredData.reduce((acc, curr) => acc + parseFloat(curr.weight_kg || 0), 0).toFixed(2)} Kg
+                </span>
             </div>
             
             <div style={{ display: 'flex', gap: '10px' }}>
@@ -379,6 +392,37 @@ function StatsBulanan() {
                 <button onClick={handleExportPDF} style={styles.exportButtonPDF} disabled={isExporting}>
                   {isExporting ? '...' : 'Ekspor PDF (Per Area)'}
                 </button>
+            </div>
+          </div>
+
+          {/* --- FILTER TABLE UI (DROPDOWNS) --- */}
+          <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+            {/* Filter Area */}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '4px' }}>Filter Area:</label>
+                <select 
+                    value={filterArea} 
+                    onChange={(e) => setFilterArea(e.target.value)}
+                    style={{ padding: '6px', borderRadius: '4px', border: '1px solid #ccc' }}
+                >
+                    {uniqueAreas.map(area => (
+                        <option key={area} value={area}>{area}</option>
+                    ))}
+                </select>
+            </div>
+
+            {/* Filter Item */}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '4px' }}>Filter Sampah:</label>
+                <select 
+                    value={filterItem} 
+                    onChange={(e) => setFilterItem(e.target.value)}
+                    style={{ padding: '6px', borderRadius: '4px', border: '1px solid #ccc' }}
+                >
+                    {uniqueItems.map(item => (
+                        <option key={item} value={item}>{item}</option>
+                    ))}
+                </select>
             </div>
           </div>
 
@@ -397,8 +441,8 @@ function StatsBulanan() {
                 </tr>
               </thead>
               <tbody>
-                {tableData.length > 0 ? (
-                  tableData.map((row, index) => (
+                {filteredData.length > 0 ? (
+                  filteredData.map((row, index) => (
                     <tr key={index}>
                       <td style={{...styles.td, textAlign:'center'}}>{index + 1}</td>
                       <td style={styles.td}>{new Date(row.recorded_at).toLocaleDateString('id-ID')}</td>
@@ -412,7 +456,9 @@ function StatsBulanan() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="8" style={{ ...styles.td, textAlign: 'center' }}>Tidak ada data mentah.</td>
+                    <td colSpan="8" style={{ ...styles.td, textAlign: 'center', padding: '20px', color: '#888' }}>
+                        Tidak ada data yang sesuai filter.
+                    </td>
                   </tr>
                 )}
               </tbody>

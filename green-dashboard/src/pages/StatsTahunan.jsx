@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -25,17 +25,27 @@ function StatsTahunan() {
   const jsDate = new Date();
   const [selectedYear, setSelectedYear] = useState(jsDate.getFullYear());
 
+  // --- STATE BARU UNTUK FILTER TABEL ---
+  const [filterArea, setFilterArea] = useState('Semua');
+  const [filterItem, setFilterItem] = useState('Semua');
+
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
       setErrorMessage('');
       const token = localStorage.getItem('adminToken');
       
+      // Reset filter saat ganti tahun
+      setFilterArea('Semua');
+      setFilterItem('Semua');
+
       const params = { range: 'yearly', year: selectedYear }; 
       const headers = { 'Authorization': `Bearer ${token}` };
       
       try {
         const baseURL = 'https://proyek-pencatatan-sampah.vercel.app';
+        // const baseURL = 'http://localhost:5000'; // Gunakan ini saat tes lokal
+
         const statsRequest = axios.get(`${baseURL}/api/stats`, { params, headers });
         const recordsRequest = axios.get(`${baseURL}/api/records`, { params, headers });
 
@@ -55,6 +65,27 @@ function StatsTahunan() {
     };
     fetchData();
   }, [navigate, selectedYear]); 
+
+  // --- LOGIKA FILTER (BARU) ---
+  // 1. Ambil list unik untuk Dropdown
+  const uniqueAreas = useMemo(() => {
+    const areas = tableData.map(row => row.area_label).filter(Boolean);
+    return ['Semua', ...new Set(areas)];
+  }, [tableData]);
+
+  const uniqueItems = useMemo(() => {
+    const items = tableData.map(row => row.item_label).filter(Boolean);
+    return ['Semua', ...new Set(items)];
+  }, [tableData]);
+
+  // 2. Filter Data Tabel
+  const filteredData = useMemo(() => {
+    return tableData.filter(row => {
+      const areaMatch = filterArea === 'Semua' || row.area_label === filterArea;
+      const itemMatch = filterItem === 'Semua' || row.item_label === filterItem;
+      return areaMatch && itemMatch;
+    });
+  }, [tableData, filterArea, filterItem]);
 
   // --- LOGIKA PDF DETAIL (TAHUNAN) ---
   const loadScript = (src) => {
@@ -288,6 +319,8 @@ function StatsTahunan() {
     const token = localStorage.getItem('adminToken');
     try {
       const baseURL = 'https://proyek-pencatatan-sampah.vercel.app'; 
+      // const baseURL = 'http://localhost:5000'; // Gunakan ini saat tes lokal
+
       const response = await axios.get(`${baseURL}/api/export/yearly`, {
         headers: { 'Authorization': `Bearer ${token}` },
         params: { year: selectedYear },
@@ -356,7 +389,9 @@ function StatsTahunan() {
           <div style={styles.tableHeaderContainer}>
             <div style={{display: 'flex', flexDirection:'column'}}>
                 <h3 style={styles.previewTitle}>Data Mentah (Tahun Ini)</h3>
-                <span style={{ fontSize: '0.9rem', color: '#1D5D50', fontWeight: 'bold' }}>Total: {totalWeight.toFixed(2)} Kg</span>
+                <span style={{ fontSize: '0.9rem', color: '#1D5D50', fontWeight: 'bold' }}>
+                  Total (Filtered): {filteredData.reduce((acc, curr) => acc + parseFloat(curr.weight_kg || 0), 0).toFixed(2)} Kg
+                </span>
             </div>
             
             <div style={{ display: 'flex', gap: '10px' }}>
@@ -366,6 +401,37 @@ function StatsTahunan() {
                 <button onClick={handleExportPDF} style={styles.exportButtonPDF} disabled={isExporting}>
                   {isExporting ? '...' : 'Ekspor PDF (Detail)'}
                 </button>
+            </div>
+          </div>
+
+          {/* --- FILTER TABLE UI (DROPDOWNS) --- */}
+          <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+            {/* Filter Area */}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '4px' }}>Filter Area:</label>
+                <select 
+                    value={filterArea} 
+                    onChange={(e) => setFilterArea(e.target.value)}
+                    style={{ padding: '6px', borderRadius: '4px', border: '1px solid #ccc' }}
+                >
+                    {uniqueAreas.map(area => (
+                        <option key={area} value={area}>{area}</option>
+                    ))}
+                </select>
+            </div>
+
+            {/* Filter Item */}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '4px' }}>Filter Sampah:</label>
+                <select 
+                    value={filterItem} 
+                    onChange={(e) => setFilterItem(e.target.value)}
+                    style={{ padding: '6px', borderRadius: '4px', border: '1px solid #ccc' }}
+                >
+                    {uniqueItems.map(item => (
+                        <option key={item} value={item}>{item}</option>
+                    ))}
+                </select>
             </div>
           </div>
           
@@ -384,8 +450,8 @@ function StatsTahunan() {
                 </tr>
               </thead>
               <tbody>
-                {tableData.length > 0 ? (
-                  tableData.map((row, index) => (
+                {filteredData.length > 0 ? (
+                  filteredData.map((row, index) => (
                     <tr key={index}>
                       <td style={{...styles.td, textAlign:'center'}}>{index + 1}</td>
                       <td style={styles.td}>{row.area_label}</td>
@@ -399,7 +465,9 @@ function StatsTahunan() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="8" style={{ ...styles.td, textAlign: 'center' }}>Tidak ada data mentah.</td>
+                    <td colSpan="8" style={{ ...styles.td, textAlign: 'center', padding: '20px', color: '#888' }}>
+                        Tidak ada data yang sesuai filter.
+                    </td>
                   </tr>
                 )}
               </tbody>
@@ -424,7 +492,7 @@ const styles = {
   filterContainer: { display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' },
   filterGroup: { display: 'flex', flexDirection: 'column' },
   filterLabel: { fontSize: '14px', color: '#333', marginBottom: '4px', fontWeight: '500' },
-  filterSelect: { padding: '8px 12px', fontSize: '14px', borderRadius: '5px', border: '1px solid #ccc' }
+  filterSelect: { padding: '8px 12px', fontSize: '14px', borderRadius: '5px', border: '1px solid #ccc', minWidth: '150px' }
 };
 
 export default StatsTahunan;
