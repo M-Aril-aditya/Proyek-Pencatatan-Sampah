@@ -5,73 +5,84 @@ const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
+const upload = multer();
 const csv = require('csv-parser');
 const excel = require('exceljs');
 const { Readable } = require('stream');
 
 const app = express();
-// Middleware untuk cek login admin
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  if (!token) return res.sendStatus(401);
-  
-  // Ganti 'rahasia' sesuai dengan JWT_SECRET di file .env Anda atau biarkan default jika di login admin pakai 'rahasia'
-  const jwtSecret = process.env.JWT_SECRET || 'rahasia'; 
-  
-  jwt.verify(token, jwtSecret, (err, user) => {
-    if (err) return res.sendStatus(403);
-    req.user = user;
-    next();
-  });
-};
 const PORT = process.env.PORT || 5000;
 
 // --- 1. KONEKSI DATABASE ---
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: { rejectUnauthorized: false } // Wajib untuk Vercel/Neon/Supabase
 });
 
-// --- 2. CONFIG MULTER ---
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
-
-// --- 3. MIDDLEWARE ---
+// --- 2. MIDDLEWARE ---
 app.use(cors({
     origin: '*', 
-    methods: ['GET', 'POST', 'PUT', 'DELETE'], // Pastikan DELETE & PUT ada disini!
+    methods: ['GET', 'POST', 'PUT', 'DELETE'], // Mengizinkan Update & Delete
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
 
+// --- 3. FUNGSI CEK TOKEN (PROTEKSI) ---
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) return res.status(401).json({ message: "Akses ditolak. Token tidak ditemukan." });
+  
+  // Pastikan JWT_SECRET sama dengan saat login
+  const jwtSecret = process.env.JWT_SECRET || 'rahasia'; 
+
+  jwt.verify(token, jwtSecret, (err, user) => {
+    if (err) return res.status(403).json({ message: "Token tidak valid." });
+    req.user = user;
+    next();
+  });
+};
+
 // --- 4. ROUTES UTAMA ---
 
 app.get('/', (req, res) => {
-    res.send('Green Backend is Running!');
+    res.send('Green Backend is Running & Secure!');
 });
 
-// --- A. LOGIN ADMIN ---
+// --- A. LOGIN ADMIN (Mendapatkan Token) ---
 app.post('/api/login', async (req, res) => {
   try {
-    const { username, password } = req.body;
-    const userQuery = await pool.query('SELECT * FROM admins WHERE username = $1', [username]);
+    const { username, password } = req.body; // Bisa email atau username
     
-    if (userQuery.rows.length === 0) return res.status(404).json({ message: 'Admin tidak ditemukan' });
+    // Cek di tabel petugas (atau tabel admin jika Anda pisah)
+    // Di sini saya asumsikan admin juga ada di tabel petugas atau tabel khusus
+    // Sesuaikan query ini dengan tabel admin Anda sebenarnya
+    const userQuery = await pool.query('SELECT * FROM petugas WHERE username = $1', [username]);
     
-    const admin = userQuery.rows[0];
-    const isMatch = await bcrypt.compare(password, admin.password_hash);
+    if (userQuery.rows.length === 0) return res.status(404).json({ message: 'User tidak ditemukan' });
     
+    const user = userQuery.rows[0];
+
+    // Cek Password (Hash)
+    const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ message: 'Password salah' });
     
-    const token = jwt.sign({ id: admin.id, username: admin.username }, process.env.JWT_SECRET || 'rahasia', { expiresIn: '1d' });
+    // Buat Token
+    const token = jwt.sign(
+        { id: user.id, username: user.username }, 
+        process.env.JWT_SECRET || 'rahasia', 
+        { expiresIn: '1d' }
+    );
+    
     res.json({ message: 'Login berhasil', token });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ message: 'Server error saat login.' });
   }
 });
 
-// --- B. LOGIN PETUGAS ---
+// --- B. LOGIN PETUGAS (Untuk Aplikasi Mobile Petugas) ---
 app.post('/api/login-petugas', async (req, res) => {
     const { username, password } = req.body;
     try {
@@ -79,76 +90,90 @@ app.post('/api/login-petugas', async (req, res) => {
         if (result.rows.length === 0) return res.status(404).json({ message: 'Petugas tidak ditemukan' });
 
         const petugas = result.rows[0];
-        if (password !== petugas.password) {
+
+        // VERSI AMAN: Cek hash password
+        const isMatch = await bcrypt.compare(password, petugas.password);
+        
+        if (!isMatch) {
             return res.status(401).json({ message: 'Password salah' });
         }
 
         res.json({ message: 'Login Berhasil', role: 'petugas', username: petugas.username });
     } catch (err) {
+        console.error(err);
         res.status(500).json({ message: 'Server Error' });
     }
 });
 
-// --- C. MANAJEMEN PETUGAS ---
-app.get('/api/petugas', async (req, res) => {
+// --- C. MANAJEMEN PETUGAS (CRUD) ---
+
+// 1. GET SEMUA PETUGAS (Butuh Token)
+app.get('/api/petugas', authenticateToken, async (req, res) => {
     try {
-        const result = await pool.query('SELECT id, username FROM petugas ORDER BY id DESC');
+        const result = await pool.query('SELECT id, username FROM petugas ORDER BY id ASC');
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ message: 'Gagal mengambil data petugas' });
     }
 });
 
-app.post('/api/petugas', async (req, res) => {
+// 2. TAMBAH PETUGAS BARU (Butuh Token)
+app.post('/api/petugas', authenticateToken, async (req, res) => {
     const { username, password } = req.body;
     try {
+        // Cek duplikat
         const cek = await pool.query('SELECT * FROM petugas WHERE username = $1', [username]);
         if (cek.rows.length > 0) return res.status(400).json({ message: 'Username sudah ada!' });
 
         const newUser = await pool.query(
-            'INSERT INTO petugas (username, password) VALUES ($1, $2) RETURNING *',
+            'INSERT INTO petugas (username, password) VALUES ($1, $2) RETURNING id, username',
             [username, password]
         );
         res.json({ message: 'Petugas berhasil dibuat', petugas: newUser.rows[0] });
     } catch (err) {
+        console.error(err);
         res.status(500).json({ message: 'Gagal menambah petugas' });
     }
 });
 
-// --- TAMBAHAN FITUR BARU (MULAI) ---
-
-// 1. Fitur HAPUS Petugas
-app.delete('/api/petugas/:id', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    await pool.query('DELETE FROM petugas WHERE id = $1', [id]);
-    res.json({ message: 'Petugas berhasil dihapus' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Gagal menghapus petugas' });
-  }
-});
-
-// 2. Fitur EDIT PASSWORD Petugas
+// 3. UPDATE PASSWORD PETUGAS (Butuh Token)
 app.put('/api/petugas/:id', authenticateToken, async (req, res) => {
-  try {
     const { id } = req.params;
-    const { newPassword } = req.body; // Password baru dari frontend
+    const { newPassword } = req.body; // Menerima password baru
 
-    if (!newPassword) {
-      return res.status(400).json({ error: 'Password baru wajib diisi' });
+    if (!newPassword) return res.status(400).json({ message: "Password baru tidak boleh kosong" });
+
+    try {
+        // Hash Password Baru
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        // Update Database
+        await pool.query('UPDATE petugas SET password = $1 WHERE id = $2', [hashedPassword, id]);
+
+        res.json({ message: "Password berhasil diperbarui" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Gagal update password' });
     }
-
-    // UPDATE langsung (Tanpa Enkripsi/Hash) agar cocok dengan login APK yang sekarang
-    await pool.query('UPDATE petugas SET password = $1 WHERE id = $2', [newPassword, id]);
-    
-    res.json({ message: 'Password berhasil diperbarui' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Gagal mengupdate password' });
-  }
 });
-// --- TAMBAHAN FITUR BARU (SELESAI) ---
+
+// 4. DELETE PETUGAS (Butuh Token)
+app.delete('/api/petugas/:id', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM petugas WHERE id = $1', [id]);
+        
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: "Petugas tidak ditemukan" });
+        }
+        
+        res.json({ message: "Petugas berhasil dihapus" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Gagal menghapus petugas' });
+    }
+});
 
 // --- D. UPLOAD CSV (UPDATE: FITUR TANGGAL MANUAL) ---
 app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
