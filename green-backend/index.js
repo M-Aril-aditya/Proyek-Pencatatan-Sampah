@@ -10,6 +10,21 @@ const excel = require('exceljs');
 const { Readable } = require('stream');
 
 const app = express();
+// Middleware untuk cek login admin
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return res.sendStatus(401);
+  
+  // Ganti 'rahasia' sesuai dengan JWT_SECRET di file .env Anda atau biarkan default jika di login admin pakai 'rahasia'
+  const jwtSecret = process.env.JWT_SECRET || 'rahasia'; 
+  
+  jwt.verify(token, jwtSecret, (err, user) => {
+    if (err) return res.sendStatus(403);
+    req.user = user;
+    next();
+  });
+};
 const PORT = process.env.PORT || 5000;
 
 // --- 1. KONEKSI DATABASE ---
@@ -23,10 +38,9 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 // --- 3. MIDDLEWARE ---
-// --- UPDATE BAGIAN INI DI INDEX.JS ---
 app.use(cors({
-    origin: '*', // Mengizinkan akses dari semua domain (Web & Mobile)
-    methods: ['GET', 'POST', 'PUT', 'DELETE'], // Pastikan DELETE dan PUT ada di sini!
+    origin: '*', 
+    methods: ['GET', 'POST', 'PUT', 'DELETE'], // Pastikan DELETE & PUT ada disini!
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
@@ -101,13 +115,12 @@ app.post('/api/petugas', async (req, res) => {
     }
 });
 
-// --- TAMBAHKAN/PASTIKAN KODE INI ADA DI INDEX.JS ---
+// --- TAMBAHAN FITUR BARU (MULAI) ---
 
-// 1. Route DELETE Petugas (Pastikan ini ada)
+// 1. Fitur HAPUS Petugas
 app.delete('/api/petugas/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    // Hapus data petugas berdasarkan ID
     await pool.query('DELETE FROM petugas WHERE id = $1', [id]);
     res.json({ message: 'Petugas berhasil dihapus' });
   } catch (error) {
@@ -116,21 +129,18 @@ app.delete('/api/petugas/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// 2. Route UPDATE Password Petugas (Fitur Baru)
+// 2. Fitur EDIT PASSWORD Petugas
 app.put('/api/petugas/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { newPassword } = req.body;
+    const { newPassword } = req.body; // Password baru dari frontend
 
     if (!newPassword) {
       return res.status(400).json({ error: 'Password baru wajib diisi' });
     }
 
-    // Enkripsi password baru
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-    // Update database
-    await pool.query('UPDATE petugas SET password = $1 WHERE id = $2', [hashedPassword, id]);
+    // UPDATE langsung (Tanpa Enkripsi/Hash) agar cocok dengan login APK yang sekarang
+    await pool.query('UPDATE petugas SET password = $1 WHERE id = $2', [newPassword, id]);
     
     res.json({ message: 'Password berhasil diperbarui' });
   } catch (error) {
@@ -138,6 +148,7 @@ app.put('/api/petugas/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Gagal mengupdate password' });
   }
 });
+// --- TAMBAHAN FITUR BARU (SELESAI) ---
 
 // --- D. UPLOAD CSV (UPDATE: FITUR TANGGAL MANUAL) ---
 app.post('/api/upload', upload.array('csvFiles'), async (req, res) => {
