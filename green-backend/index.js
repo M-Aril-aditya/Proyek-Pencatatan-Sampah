@@ -23,7 +23,12 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 // --- 3. MIDDLEWARE ---
-app.use(cors());
+// --- UPDATE BAGIAN INI DI INDEX.JS ---
+app.use(cors({
+    origin: '*', // Mengizinkan akses dari semua domain (Web & Mobile)
+    methods: ['GET', 'POST', 'PUT', 'DELETE'], // Pastikan DELETE dan PUT ada di sini!
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
 // --- 4. ROUTES UTAMA ---
@@ -96,13 +101,42 @@ app.post('/api/petugas', async (req, res) => {
     }
 });
 
-app.delete('/api/petugas/:id', async (req, res) => {
-    try {
-        await pool.query('DELETE FROM petugas WHERE id = $1', [req.params.id]);
-        res.json({ message: 'Petugas dihapus' });
-    } catch (err) {
-        res.status(500).json({ message: 'Gagal menghapus' });
+// --- TAMBAHKAN/PASTIKAN KODE INI ADA DI INDEX.JS ---
+
+// 1. Route DELETE Petugas (Pastikan ini ada)
+app.delete('/api/petugas/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Hapus data petugas berdasarkan ID
+    await pool.query('DELETE FROM petugas WHERE id = $1', [id]);
+    res.json({ message: 'Petugas berhasil dihapus' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Gagal menghapus petugas' });
+  }
+});
+
+// 2. Route UPDATE Password Petugas (Fitur Baru)
+app.put('/api/petugas/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newPassword } = req.body;
+
+    if (!newPassword) {
+      return res.status(400).json({ error: 'Password baru wajib diisi' });
     }
+
+    // Enkripsi password baru
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update database
+    await pool.query('UPDATE petugas SET password = $1 WHERE id = $2', [hashedPassword, id]);
+    
+    res.json({ message: 'Password berhasil diperbarui' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Gagal mengupdate password' });
+  }
 });
 
 // --- D. UPLOAD CSV (UPDATE: FITUR TANGGAL MANUAL) ---
