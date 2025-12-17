@@ -9,14 +9,15 @@ import {
   TextInput, 
   View, 
   TouchableOpacity,
-  ActivityIndicator
+  ActivityIndicator,
+  Platform // 1. Tambah Platform untuk deteksi Web/HP
 } from 'react-native';
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage'; // Pastikan sudah install ini
 
 // Link Backend Vercel Anda
-// GUNAKAN LINK BACKEND INI (Bukan link dashboard):
 const API_URL = 'https://proyek-pencatatan-sampah.vercel.app/api';
-// Definisikan tipe User
+
 interface User {
   id: number;
   username: string;
@@ -29,18 +30,22 @@ export default function AdminScreen() {
   const [newPassword, setNewPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Muat daftar user saat halaman dibuka
   useEffect(() => {
     loadUsers();
   }, []);
 
-  // 1. Ambil Data dari Cloud (GET) - DENGAN PERBAIKAN ERROR
+  // --- HELPER: HEADER TOKEN (Agar tidak Error 401) ---
+  const getHeaders = async () => {
+    const token = await AsyncStorage.getItem('userToken');
+    return { headers: { Authorization: `Bearer ${token}` } };
+  };
+
+  // 1. Ambil Data dari Cloud (GET)
   const loadUsers = async () => {
     try {
-      const response = await axios.get(`${API_URL}/petugas`);
-      console.log("Data Petugas:", response.data); // Cek di terminal
-
-      // Pastikan data yang diterima adalah Array. Jika tidak, set array kosong.
+      const config = await getHeaders(); // Pakai Token
+      const response = await axios.get(`${API_URL}/petugas`, config);
+      
       if (Array.isArray(response.data)) {
         setUsers(response.data);
       } else {
@@ -48,56 +53,100 @@ export default function AdminScreen() {
       }
     } catch (e) {
       console.error('Gagal memuat petugas:', e);
-      // Jangan tampilkan alert terus menerus jika error koneksi, cukup log saja
     }
   };
 
   // 2. Tambah User ke Cloud (POST)
   const handleAddUser = async () => {
     if (!newUsername || !newPassword) {
-      Alert.alert('Gagal', 'Username dan Password tidak boleh kosong.');
+      // Peringatan di Web vs HP
+      if (Platform.OS === 'web') {
+        alert('Username dan Password tidak boleh kosong.');
+      } else {
+        Alert.alert('Gagal', 'Username dan Password tidak boleh kosong.');
+      }
       return;
     }
 
     setLoading(true);
     try {
+      const config = await getHeaders(); // Pakai Token
       await axios.post(`${API_URL}/petugas`, {
         username: newUsername.trim(),
         password: newPassword.trim()
-      });
+      }, config);
       
-      Alert.alert('Sukses', `Petugas ${newUsername} berhasil ditambahkan.`);
+      // Pesan Sukses
+      if (Platform.OS === 'web') {
+        alert(`Petugas ${newUsername} berhasil ditambahkan.`);
+      } else {
+        Alert.alert('Sukses', `Petugas ${newUsername} berhasil ditambahkan.`);
+      }
+
       setNewUsername(''); 
       setNewPassword('');
-      loadUsers(); // Refresh list
+      loadUsers(); 
     } catch (e: any) {
-      console.error('Gagal menambah petugas:', e);
       const msg = e.response?.data?.message || 'Gagal menambah petugas.';
-      Alert.alert('Gagal', msg);
+      if (Platform.OS === 'web') {
+        alert(msg);
+      } else {
+        Alert.alert('Gagal', msg);
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  // 3. Hapus User dari Cloud (DELETE)
+  // 3. Hapus User dari Cloud (DELETE) - PERBAIKAN KHUSUS WEB
   const handleDeleteUser = async (id: number, username: string) => {
-    Alert.alert(
-      "Konfirmasi Hapus",
-      `Yakin ingin menghapus petugas ${username}?`,
-      [
-        { text: "Batal", style: "cancel" },
-        { text: "Hapus", style: "destructive", onPress: async () => {
-            try {
-              await axios.delete(`${API_URL}/petugas/${id}`);
-              loadUsers(); // Refresh list
-            } catch (e) {
-              console.error('Gagal menghapus user:', e);
-              Alert.alert('Error', 'Gagal menghapus petugas.');
+    
+    // Fungsi Eksekusi Hapus (Dipisahkan agar bisa dipanggil Web & HP)
+    const executeDelete = async () => {
+        try {
+            const config = await getHeaders(); // Pakai Token
+            await axios.delete(`${API_URL}/petugas/${id}`, config);
+            loadUsers(); // Refresh list
+            
+            // Pesan Sukses
+            if (Platform.OS === 'web') {
+                alert("Data berhasil dihapus.");
+            } else {
+                Alert.alert("Sukses", "Data berhasil dihapus.");
             }
-          }
+        } catch (e) {
+            console.error('Gagal menghapus user:', e);
+            if (Platform.OS === 'web') {
+                alert('Gagal menghapus petugas.');
+            } else {
+                Alert.alert('Error', 'Gagal menghapus petugas.');
+            }
         }
-      ]
-    );
+    };
+
+    // --- LOGIKA CABANG: WEB vs HP ---
+    if (Platform.OS === 'web') {
+        // [WEB] Gunakan window.confirm (Popup bawaan Browser)
+        const yakin = window.confirm(`Yakin ingin menghapus petugas ${username}?`);
+        if (yakin) {
+            executeDelete();
+        }
+    } else {
+        // [HP] Gunakan Alert.alert (Popup bawaan Android/iOS)
+        Alert.alert(
+            "Konfirmasi Hapus",
+            `Yakin ingin menghapus petugas ${username}?`,
+            [
+                { text: "Batal", style: "cancel" },
+                { text: "Hapus", style: "destructive", onPress: executeDelete }
+            ]
+        );
+    }
+  };
+
+  const handleLogout = async () => {
+      await AsyncStorage.removeItem('userToken'); // Hapus token saat logout
+      router.replace('/');
   };
 
   return (
@@ -108,7 +157,7 @@ export default function AdminScreen() {
         <Text style={styles.title}>Manajemen Petugas</Text>
         <TouchableOpacity 
           style={styles.smallLogoutButton} 
-          onPress={() => router.replace('/')}
+          onPress={handleLogout}
         >
           <Text style={styles.smallLogoutText}>Logout</Text>
         </TouchableOpacity>
@@ -139,12 +188,11 @@ export default function AdminScreen() {
         )}
       </View>
 
-      {/* DAFTAR USER - DENGAN PERBAIKAN FLATLIST */}
+      {/* DAFTAR USER */}
       <Text style={[styles.sectionTitle, { marginLeft: 5, marginBottom: 10 }]}>Daftar Petugas Terdaftar:</Text>
       
       <FlatList
         data={users}
-        // PERBAIKAN UTAMA: Cek apakah item & item.id ada. Jika tidak, pakai index.
         keyExtractor={(item, index) => (item && item.id) ? item.id.toString() : index.toString()}
         renderItem={({ item }) => (
           <View style={styles.userItem}>
@@ -157,7 +205,6 @@ export default function AdminScreen() {
                 <Text style={styles.userName}>{item.username || 'Tanpa Nama'}</Text>
             </View>
             <TouchableOpacity 
-              // Pastikan id ada sebelum delete
               onPress={() => item.id && handleDeleteUser(item.id, item.username)} 
               style={styles.deleteButton}
             >
