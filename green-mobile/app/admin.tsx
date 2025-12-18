@@ -12,25 +12,25 @@ import {
   ActivityIndicator,
   Modal,
   Pressable,
-  Platform // Penting untuk Web
+  Platform 
 } from 'react-native';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons'; 
 
-// Ganti dengan URL Vercel Backend Anda
+// URL Backend Anda
 const API_URL = 'https://proyek-pencatatan-sampah.vercel.app/api';
 
 interface User {
   id: number;
   username: string;
-  password?: string; // Kita butuh ini untuk ditampilkan
+  password?: string;
 }
 
 export default function AdminScreen() {
   const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
   
-  // State Input Baru
+  // State Input
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -42,11 +42,8 @@ export default function AdminScreen() {
   const [editPassword, setEditPassword] = useState('');
   const [showEditPassword, setShowEditPassword] = useState(false);
 
-  // State Loading
+  // State Loading & Visibility
   const [loading, setLoading] = useState(false);
-
-  // State Khusus: Untuk menyimpan ID user mana saja yang passwordnya sedang "terbuka"
-  // Contoh: { 1: true, 5: false } artinya user ID 1 terlihat, ID 5 tersembunyi
   const [visiblePasswordMap, setVisiblePasswordMap] = useState<{[key: number]: boolean}>({});
 
   useEffect(() => {
@@ -90,19 +87,17 @@ export default function AdminScreen() {
     }
   };
 
-  // --- 3. DELETE USER (AMAN UNTUK WEB & HP) ---
+  // --- 3. DELETE USER ---
   const handleDeleteUser = async (id: number, username: string) => {
     const executeDelete = async () => {
         try {
             await axios.delete(`${API_URL}/petugas/${id}`);
-            // Reset visibility map jika user dihapus
             const newMap = {...visiblePasswordMap};
             delete newMap[id];
             setVisiblePasswordMap(newMap);
             
             if (Platform.OS === 'web') window.alert("Petugas berhasil dihapus!");
             else Alert.alert("Sukses", "Petugas berhasil dihapus");
-            
             loadUsers();
         } catch (e) {
             console.error(e);
@@ -120,7 +115,7 @@ export default function AdminScreen() {
     }
   };
 
-  // --- 4. EDIT USER ---
+  // --- 4. UPDATE USER ---
   const openEditModal = (user: User) => {
     setEditingUser(user);
     setEditUsername(user.username);
@@ -148,24 +143,20 @@ export default function AdminScreen() {
     }
   };
 
-  // Helper Alert
   const alertWebOrMobile = (title: string, msg: string) => {
     if (Platform.OS === 'web') window.alert(`${title}: ${msg}`);
     else Alert.alert(title, msg);
   };
 
-  // --- FUNGSI TOGGLE LIHAT PASSWORD ---
   const toggleRowPassword = (id: number) => {
     setVisiblePasswordMap(prev => ({
         ...prev,
-        [id]: !prev[id] // Balik status (True jadi False, False jadi True)
+        [id]: !prev[id]
     }));
   };
 
   return (
     <View style={styles.container}>
-      
-      {/* HEADER */}
       <View style={styles.topHeaderContainer}>
         <Text style={styles.title}>Manajemen Petugas</Text>
         <TouchableOpacity style={styles.smallLogoutButton} onPress={() => router.replace('/')}>
@@ -173,7 +164,6 @@ export default function AdminScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* FORM TAMBAH USER */}
       <View style={styles.formContainer}>
         <Text style={styles.sectionTitle}>Tambah Akun Baru</Text>
         <TextInput
@@ -203,18 +193,20 @@ export default function AdminScreen() {
         )}
       </View>
 
-      {/* LIST PETUGAS */}
       <Text style={[styles.sectionTitle, { marginLeft: 5, marginBottom: 10 }]}>Daftar Petugas:</Text>
       
+      {/* --- INI PERBAIKAN UTAMANYA (extraData) --- */}
       <FlatList
         data={users}
+        extraData={visiblePasswordMap} // <<-- KUNCI AGAR TOMBOL MATA BERFUNGSI
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => {
             const isPasswordVisible = visiblePasswordMap[item.id] || false;
+            // Cek apakah password ada isinya, jika tidak tampilkan '(Kosong)'
+            const displayPassword = item.password ? item.password : '(Kosong)';
 
             return (
               <View style={styles.userItem}>
-                {/* INFO KIRI: Avatar & Nama/Password */}
                 <View style={{flexDirection:'row', alignItems:'center', flex: 1}}>
                     <View style={styles.avatar}>
                         <Text style={{color:'white', fontWeight:'bold'}}>
@@ -225,24 +217,22 @@ export default function AdminScreen() {
                     <View style={{justifyContent:'center'}}>
                         <Text style={styles.userName}>{item.username}</Text>
                         
-                        {/* BAGIAN PASSWORD DI SINI */}
                         <TouchableOpacity 
-                            style={{flexDirection:'row', alignItems:'center', marginTop: 2}}
+                            style={{flexDirection:'row', alignItems:'center', marginTop: 5, padding: 5}} 
                             onPress={() => toggleRowPassword(item.id)}
                         >
-                            <Text style={{color:'#666', fontSize: 12, marginRight: 5}}>
-                                Password: {isPasswordVisible ? item.password : '••••••'}
+                            <Text style={{color:'#666', fontSize: 13, marginRight: 8, fontFamily: Platform.OS === 'web' ? 'monospace' : undefined}}>
+                                {isPasswordVisible ? displayPassword : '••••••'}
                             </Text>
                             <Ionicons 
                                 name={isPasswordVisible ? "eye-off" : "eye"} 
-                                size={14} 
+                                size={18} 
                                 color="#1D5D5D" 
                             />
                         </TouchableOpacity>
                     </View>
                 </View>
                 
-                {/* TOMBOL AKSI KANAN */}
                 <View style={{flexDirection: 'row', gap: 10}}>
                     <TouchableOpacity 
                         onPress={() => openEditModal(item)} 
@@ -264,7 +254,7 @@ export default function AdminScreen() {
         ListEmptyComponent={<Text style={{textAlign:'center', color:'#888'}}>Belum ada data.</Text>}
       />
 
-      {/* MODAL EDIT */}
+      {/* MODAL EDIT SAMA SEPERTI SEBELUMNYA */}
       <Modal
         animationType="slide"
         transparent={true}
