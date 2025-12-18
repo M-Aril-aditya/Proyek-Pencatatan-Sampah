@@ -98,11 +98,63 @@ app.post('/api/petugas', async (req, res) => {
 
 app.delete('/api/petugas/:id', async (req, res) => {
     try {
-        await pool.query('DELETE FROM petugas WHERE id = $1', [req.params.id]);
-        res.json({ message: 'Petugas dihapus' });
+        const { id } = req.params;
+        const deleteQuery = await pool.query('DELETE FROM petugas WHERE id = $1 RETURNING *', [id]);
+        
+        if (deleteQuery.rows.length === 0) {
+            return res.status(404).json({ message: "Petugas tidak ditemukan untuk dihapus" });
+        }
+
+        res.json({ message: 'Petugas berhasil dihapus' });
     } catch (err) {
-        res.status(500).json({ message: 'Gagal menghapus' });
+        console.error(err.message);
+        res.status(500).json({ message: 'Gagal menghapus data' });
     }
+});
+
+// UPDATE USER
+app.put('/api/petugas/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { username, password } = req.body;
+
+        // Cek apakah user ada
+        const cekUser = await pool.query('SELECT * FROM petugas WHERE id = $1', [id]);
+        if (cekUser.rows.length === 0) {
+            return res.status(404).json({ message: "Petugas tidak ditemukan" });
+        }
+
+        // Lakukan Update
+        await pool.query(
+            "UPDATE petugas SET username = $1, password = $2 WHERE id = $3",
+            [username, password, id]
+        );
+
+        res.json({ message: "Data petugas berhasil diperbarui!" });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ message: "Server Error saat update petugas" });
+    }
+});
+
+// UPDATE DATA PETUGAS
+app.put('/petugas/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { username, password } = req.body;
+    
+    // Update data di database
+    // Catatan: Ini akan mengupdate username dan password langsung
+    const updatePetugas = await pool.query(
+      "UPDATE petugas SET username = $1, password = $2 WHERE id = $3",
+      [username, password, id]
+    );
+
+    res.json("Data petugas berhasil diperbarui!");
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server Error");
+  }
 });
 
 // --- D. UPLOAD CSV (UPDATE: FITUR TANGGAL MANUAL) ---
