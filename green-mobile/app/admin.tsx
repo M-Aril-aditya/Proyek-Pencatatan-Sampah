@@ -12,37 +12,42 @@ import {
   ActivityIndicator,
   Modal,
   Pressable,
-  Platform
+  Platform // Penting untuk Web
 } from 'react-native';
 import axios from 'axios';
-import { Ionicons } from '@expo/vector-icons'; // Import Ikon
+import { Ionicons } from '@expo/vector-icons'; 
 
-// Pastikan URL ini benar sesuai deploy Anda
+// Ganti dengan URL Vercel Backend Anda
 const API_URL = 'https://proyek-pencatatan-sampah.vercel.app/api';
 
 interface User {
   id: number;
   username: string;
-  password?: string; // Optional untuk menampung password dari DB
+  password?: string; // Kita butuh ini untuk ditampilkan
 }
 
 export default function AdminScreen() {
   const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
   
-  // State untuk Tambah User
+  // State Input Baru
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [showNewPassword, setShowNewPassword] = useState(false); // Toggle mata tambah user
+  const [showNewPassword, setShowNewPassword] = useState(false);
   
-  // State untuk Edit User (Modal)
+  // State Edit
   const [modalVisible, setModalVisible] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editUsername, setEditUsername] = useState('');
   const [editPassword, setEditPassword] = useState('');
-  const [showEditPassword, setShowEditPassword] = useState(false); // Toggle mata edit user
+  const [showEditPassword, setShowEditPassword] = useState(false);
 
+  // State Loading
   const [loading, setLoading] = useState(false);
+
+  // State Khusus: Untuk menyimpan ID user mana saja yang passwordnya sedang "terbuka"
+  // Contoh: { 1: true, 5: false } artinya user ID 1 terlihat, ID 5 tersembunyi
+  const [visiblePasswordMap, setVisiblePasswordMap] = useState<{[key: number]: boolean}>({});
 
   useEffect(() => {
     loadUsers();
@@ -58,14 +63,14 @@ export default function AdminScreen() {
         setUsers([]);
       }
     } catch (e) {
-      console.log('Gagal memuat petugas (mungkin koneksi/server down)');
+      console.log('Gagal memuat petugas');
     }
   };
 
   // --- 2. CREATE USER ---
   const handleAddUser = async () => {
     if (!newUsername || !newPassword) {
-      Alert.alert('Gagal', 'Username dan Password wajib diisi.');
+      alertWebOrMobile('Gagal', 'Username dan Password wajib diisi.');
       return;
     }
     setLoading(true);
@@ -74,92 +79,87 @@ export default function AdminScreen() {
         username: newUsername.trim(),
         password: newPassword.trim()
       });
-      Alert.alert('Sukses', 'Petugas berhasil ditambahkan.');
+      alertWebOrMobile('Sukses', 'Petugas berhasil ditambahkan.');
       setNewUsername(''); 
       setNewPassword('');
       loadUsers(); 
     } catch (e: any) {
-      Alert.alert('Gagal', e.response?.data?.message || 'Gagal menambah petugas.');
+      alertWebOrMobile('Gagal', e.response?.data?.message || 'Gagal menambah petugas.');
     } finally {
       setLoading(false);
     }
   };
 
-  // --- 3. DELETE USER ---
-  // --- 3. DELETE USER (VERSI AMAN WEB & HP) ---
+  // --- 3. DELETE USER (AMAN UNTUK WEB & HP) ---
   const handleDeleteUser = async (id: number, username: string) => {
-    
-    // Fungsi Hapus Sebenarnya
     const executeDelete = async () => {
         try {
             await axios.delete(`${API_URL}/petugas/${id}`);
-            // Jika sukses, refresh data tanpa perlu alert berlebihan
-            if (Platform.OS === 'web') {
-                window.alert("Petugas berhasil dihapus!");
-            } else {
-                Alert.alert("Sukses", "Petugas berhasil dihapus");
-            }
+            // Reset visibility map jika user dihapus
+            const newMap = {...visiblePasswordMap};
+            delete newMap[id];
+            setVisiblePasswordMap(newMap);
+            
+            if (Platform.OS === 'web') window.alert("Petugas berhasil dihapus!");
+            else Alert.alert("Sukses", "Petugas berhasil dihapus");
+            
             loadUsers();
         } catch (e) {
-            console.error('Gagal menghapus user:', e);
-            if (Platform.OS === 'web') {
-                window.alert("Gagal menghapus petugas. Cek koneksi.");
-            } else {
-                Alert.alert('Error', 'Gagal menghapus petugas.');
-            }
+            console.error(e);
+            alertWebOrMobile('Error', 'Gagal menghapus petugas.');
         }
     };
 
-    // LOGIKA PEMISAH (WEB vs HP)
     if (Platform.OS === 'web') {
-        // Jika di Browser, pakai window.confirm bawaan browser
-        const yakin = window.confirm(`Yakin ingin menghapus petugas ${username}?`);
-        if (yakin) {
-            executeDelete();
-        }
+        if (window.confirm(`Yakin hapus ${username}?`)) executeDelete();
     } else {
-        // Jika di HP, pakai Alert bawaan React Native
-        Alert.alert(
-            "Konfirmasi Hapus",
-            `Yakin ingin menghapus petugas ${username}?`,
-            [
-                { text: "Batal", style: "cancel" },
-                { text: "Hapus", style: "destructive", onPress: executeDelete }
-            ]
-        );
+        Alert.alert("Konfirmasi", `Hapus ${username}?`, [
+            { text: "Batal", style: "cancel" },
+            { text: "Hapus", style: "destructive", onPress: executeDelete }
+        ]);
     }
   };
 
-  // --- 4. PERSIAPAN UPDATE (BUKA MODAL) ---
+  // --- 4. EDIT USER ---
   const openEditModal = (user: User) => {
     setEditingUser(user);
     setEditUsername(user.username);
-    // Jika backend mengirim password (plain), kita isi. Jika tidak, kosongkan.
     setEditPassword(user.password || ''); 
-    setShowEditPassword(false); // Reset mata tertutup
+    setShowEditPassword(false);
     setModalVisible(true);
   };
 
-  // --- 5. EKSEKUSI UPDATE ---
   const handleUpdateUser = async () => {
     if (!editingUser) return;
-    
     try {
       setLoading(true);
       await axios.put(`${API_URL}/petugas/${editingUser.id}`, {
         username: editUsername,
         password: editPassword
       });
-      
-      Alert.alert("Sukses", "Data petugas diperbarui!");
+      alertWebOrMobile("Sukses", "Data diperbarui!");
       setModalVisible(false);
       setEditingUser(null);
       loadUsers();
     } catch (error) {
-      Alert.alert("Gagal", "Gagal mengupdate data petugas.");
+      alertWebOrMobile("Gagal", "Gagal update data.");
     } finally {
       setLoading(false);
     }
+  };
+
+  // Helper Alert
+  const alertWebOrMobile = (title: string, msg: string) => {
+    if (Platform.OS === 'web') window.alert(`${title}: ${msg}`);
+    else Alert.alert(title, msg);
+  };
+
+  // --- FUNGSI TOGGLE LIHAT PASSWORD ---
+  const toggleRowPassword = (id: number) => {
+    setVisiblePasswordMap(prev => ({
+        ...prev,
+        [id]: !prev[id] // Balik status (True jadi False, False jadi True)
+    }));
   };
 
   return (
@@ -183,15 +183,13 @@ export default function AdminScreen() {
           onChangeText={setNewUsername}
           autoCapitalize="none"
         />
-        
-        {/* Input Password dengan Mata */}
         <View style={styles.passwordContainer}>
             <TextInput
-            style={styles.inputPassword}
-            placeholder="Password"
-            value={newPassword}
-            onChangeText={setNewPassword}
-            secureTextEntry={!showNewPassword} // Logika Mata
+              style={styles.inputPassword}
+              placeholder="Password"
+              value={newPassword}
+              onChangeText={setNewPassword}
+              secureTextEntry={!showNewPassword}
             />
             <TouchableOpacity onPress={() => setShowNewPassword(!showNewPassword)} style={styles.eyeIcon}>
                 <Ionicons name={showNewPassword ? "eye" : "eye-off"} size={20} color="gray" />
@@ -210,41 +208,63 @@ export default function AdminScreen() {
       
       <FlatList
         data={users}
-        keyExtractor={(item, index) => item.id ? item.id.toString() : index.toString()}
-        renderItem={({ item }) => (
-          <View style={styles.userItem}>
-            <View style={{flexDirection:'row', alignItems:'center'}}>
-                <View style={styles.avatar}>
-                    <Text style={{color:'white', fontWeight:'bold'}}>
-                      {item.username ? item.username.charAt(0).toUpperCase() : '?'}
-                    </Text>
-                </View>
-                <Text style={styles.userName}>{item.username}</Text>
-            </View>
-            
-            <View style={{flexDirection: 'row', gap: 10}}>
-                {/* Tombol EDIT (Kuning/Orange) */}
-                <TouchableOpacity 
-                    onPress={() => openEditModal(item)} 
-                    style={[styles.actionButton, { backgroundColor: '#f39c12' }]}
-                >
-                    <Ionicons name="pencil" size={16} color="white" />
-                </TouchableOpacity>
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={({ item }) => {
+            const isPasswordVisible = visiblePasswordMap[item.id] || false;
 
-                {/* Tombol HAPUS (Merah) */}
-                <TouchableOpacity 
-                    onPress={() => item.id && handleDeleteUser(item.id, item.username)} 
-                    style={[styles.actionButton, { backgroundColor: '#ff6b6b' }]}
-                >
-                    <Ionicons name="trash" size={16} color="white" />
-                </TouchableOpacity>
-            </View>
-          </View>
-        )}
+            return (
+              <View style={styles.userItem}>
+                {/* INFO KIRI: Avatar & Nama/Password */}
+                <View style={{flexDirection:'row', alignItems:'center', flex: 1}}>
+                    <View style={styles.avatar}>
+                        <Text style={{color:'white', fontWeight:'bold'}}>
+                          {item.username ? item.username.charAt(0).toUpperCase() : '?'}
+                        </Text>
+                    </View>
+                    
+                    <View style={{justifyContent:'center'}}>
+                        <Text style={styles.userName}>{item.username}</Text>
+                        
+                        {/* BAGIAN PASSWORD DI SINI */}
+                        <TouchableOpacity 
+                            style={{flexDirection:'row', alignItems:'center', marginTop: 2}}
+                            onPress={() => toggleRowPassword(item.id)}
+                        >
+                            <Text style={{color:'#666', fontSize: 12, marginRight: 5}}>
+                                Password: {isPasswordVisible ? item.password : '••••••'}
+                            </Text>
+                            <Ionicons 
+                                name={isPasswordVisible ? "eye-off" : "eye"} 
+                                size={14} 
+                                color="#1D5D5D" 
+                            />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+                
+                {/* TOMBOL AKSI KANAN */}
+                <View style={{flexDirection: 'row', gap: 10}}>
+                    <TouchableOpacity 
+                        onPress={() => openEditModal(item)} 
+                        style={[styles.actionButton, { backgroundColor: '#f39c12' }]}
+                    >
+                        <Ionicons name="pencil" size={16} color="white" />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity 
+                        onPress={() => handleDeleteUser(item.id, item.username)} 
+                        style={[styles.actionButton, { backgroundColor: '#ff6b6b' }]}
+                    >
+                        <Ionicons name="trash" size={16} color="white" />
+                    </TouchableOpacity>
+                </View>
+              </View>
+            );
+        }}
         ListEmptyComponent={<Text style={{textAlign:'center', color:'#888'}}>Belum ada data.</Text>}
       />
 
-      {/* --- MODAL EDIT (POP-UP) --- */}
+      {/* MODAL EDIT */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -281,7 +301,7 @@ export default function AdminScreen() {
                         <Text style={styles.btnText}>Batal</Text>
                     </Pressable>
                     <Pressable style={[styles.btn, styles.btnSave]} onPress={handleUpdateUser}>
-                        <Text style={styles.btnText}>Simpan Perubahan</Text>
+                        <Text style={styles.btnText}>Simpan</Text>
                     </Pressable>
                 </View>
             </View>
@@ -302,21 +322,17 @@ const styles = StyleSheet.create({
   formContainer: { marginBottom: 25, padding: 20, backgroundColor: 'white', borderRadius: 12, elevation: 2 },
   sectionTitle: { fontSize: 16, fontWeight: '600', color: '#34495e', marginBottom: 15 },
   
-  // Style Input Biasa
   input: { borderWidth: 1, borderColor: '#e0e0e0', backgroundColor: '#fbfbfb', padding: 12, marginBottom: 15, borderRadius: 8 },
-  
-  // Style Input Password dengan Mata
   passwordContainer: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#e0e0e0', backgroundColor: '#fbfbfb', borderRadius: 8, marginBottom: 15 },
   inputPassword: { flex: 1, padding: 12 },
   eyeIcon: { padding: 10 },
 
   userItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: 'white', marginBottom: 10, borderRadius: 10, borderWidth: 1, borderColor: '#eee' },
-  avatar: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#3498db', justifyContent:'center', alignItems:'center', marginRight: 10 },
+  avatar: { width: 35, height: 35, borderRadius: 17.5, backgroundColor: '#3498db', justifyContent:'center', alignItems:'center', marginRight: 10 },
   userName: { fontSize: 16, fontWeight: '500', color: '#333' },
   
   actionButton: { padding: 8, borderRadius: 6, justifyContent: 'center', alignItems: 'center' },
 
-  // Styles MODAL
   modalOverlay: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)', padding: 20 },
   modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 20, elevation: 5 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 20, textAlign: 'center', color:'#1D5D5D' },
