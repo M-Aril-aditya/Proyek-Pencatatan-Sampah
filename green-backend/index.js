@@ -86,10 +86,11 @@ app.post('/api/login-petugas', async (req, res) => {
 // --- C. MANAJEMEN PETUGAS ---
 app.get('/api/petugas', async (req, res) => {
     try {
-        const result = await pool.query('SELECT id, username FROM petugas ORDER BY id DESC');
+        // Kita ubah jadi 'SELECT *' agar Password juga ikut terkirim
+        const result = await pool.query('SELECT * FROM petugas ORDER BY id DESC');
         res.json(result.rows);
     } catch (err) {
-        res.status(500).json({ message: 'Gagal mengambil data petugas' });
+        res.status(500).json({ message: 'Gagal mengambil data' });
     }
 });
 
