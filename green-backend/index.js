@@ -23,12 +23,20 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 // --- 3. MIDDLEWARE ---
-app.use(cors({
-    origin: '*', 
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
-app.options('*', cors());
+// --- GANTI BAGIAN CORS DENGAN INI (Anti Error 500) ---
+app.use((req, res, next) => {
+  // Izinkan akses dari mana saja
+  res.header("Access-Control-Allow-Origin", "*"); 
+  // Izinkan semua tombol: Lihat, Tambah, Edit, Hapus
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"); 
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  
+  // Jika browser bertanya (Preflight), langsung jawab OK
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 app.use(express.json());
 
 // --- 4. ROUTES UTAMA ---
@@ -102,13 +110,15 @@ app.post('/api/petugas', async (req, res) => {
 });
 
 // Hapus sampah buatan dia dulu, baru hapus orangnya
+// --- GANTI BAGIAN DELETE DENGAN INI ---
 app.delete('/api/petugas/:id', async (req, res) => {
     const client = await pool.connect();
     try {
-        await client.query('BEGIN'); 
+        await client.query('BEGIN'); // Mulai mode aman
+
         const { id } = req.params;
 
-        // 1. Cari username petugas
+        // 1. Cek nama petugas dulu
         const userRes = await client.query('SELECT username FROM petugas WHERE id = $1', [id]);
         if (userRes.rows.length === 0) {
             await client.query('ROLLBACK');
@@ -116,17 +126,20 @@ app.delete('/api/petugas/:id', async (req, res) => {
         }
         const usernamePetugas = userRes.rows[0].username;
 
-        // 2. Hapus data sampah milik petugas ini
+        // 2. HAPUS SEMUA SAMPAH yang pernah dicatat dia
+        // (Ini langkah penting agar tidak error database)
         await client.query('DELETE FROM waste_records WHERE petugas_name = $1', [usernamePetugas]);
 
-        // 3. Hapus akun petugas
+        // 3. BARU HAPUS ORANGNYA
         await client.query('DELETE FROM petugas WHERE id = $1', [id]);
 
-        await client.query('COMMIT'); 
-        res.json({ message: 'Petugas dan data terkait berhasil dihapus' });
+        await client.query('COMMIT'); // Simpan perubahan
+        res.json({ message: 'Petugas dan datanya berhasil dihapus' });
+
     } catch (err) {
         await client.query('ROLLBACK');
-        res.status(500).json({ message: 'Gagal menghapus' });
+        console.error("Error Delete:", err.message);
+        res.status(500).json({ message: 'Gagal menghapus data' });
     } finally {
         client.release();
     }
