@@ -23,7 +23,11 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 // --- 3. MIDDLEWARE ---
-app.use(cors());
+app.use(cors({
+    origin: '*', 
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
 // --- 4. ROUTES UTAMA ---
@@ -96,19 +100,34 @@ app.post('/api/petugas', async (req, res) => {
     }
 });
 
+// Hapus sampah buatan dia dulu, baru hapus orangnya
 app.delete('/api/petugas/:id', async (req, res) => {
+    const client = await pool.connect();
     try {
+        await client.query('BEGIN'); 
         const { id } = req.params;
-        const deleteQuery = await pool.query('DELETE FROM petugas WHERE id = $1 RETURNING *', [id]);
-        
-        if (deleteQuery.rows.length === 0) {
-            return res.status(404).json({ message: "Petugas tidak ditemukan untuk dihapus" });
-        }
 
-        res.json({ message: 'Petugas berhasil dihapus' });
+        // 1. Cari username petugas
+        const userRes = await client.query('SELECT username FROM petugas WHERE id = $1', [id]);
+        if (userRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ message: "Petugas tidak ditemukan" });
+        }
+        const usernamePetugas = userRes.rows[0].username;
+
+        // 2. Hapus data sampah milik petugas ini
+        await client.query('DELETE FROM waste_records WHERE petugas_name = $1', [usernamePetugas]);
+
+        // 3. Hapus akun petugas
+        await client.query('DELETE FROM petugas WHERE id = $1', [id]);
+
+        await client.query('COMMIT'); 
+        res.json({ message: 'Petugas dan data terkait berhasil dihapus' });
     } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ message: 'Gagal menghapus data' });
+        await client.query('ROLLBACK');
+        res.status(500).json({ message: 'Gagal menghapus' });
+    } finally {
+        client.release();
     }
 });
 
