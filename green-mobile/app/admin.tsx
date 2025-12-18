@@ -11,7 +11,8 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Modal,
-  Pressable
+  Pressable,
+  Platform
 } from 'react-native';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons'; // Import Ikon
@@ -85,23 +86,48 @@ export default function AdminScreen() {
   };
 
   // --- 3. DELETE USER ---
+  // --- 3. DELETE USER (VERSI AMAN WEB & HP) ---
   const handleDeleteUser = async (id: number, username: string) => {
-    Alert.alert(
-      "Hapus Petugas?",
-      `Yakin ingin menghapus ${username}?`,
-      [
-        { text: "Batal", style: "cancel" },
-        { text: "Hapus", style: "destructive", onPress: async () => {
-            try {
-              await axios.delete(`${API_URL}/petugas/${id}`);
-              loadUsers();
-            } catch (e) {
-              Alert.alert('Error', 'Gagal menghapus petugas.');
+    
+    // Fungsi Hapus Sebenarnya
+    const executeDelete = async () => {
+        try {
+            await axios.delete(`${API_URL}/petugas/${id}`);
+            // Jika sukses, refresh data tanpa perlu alert berlebihan
+            if (Platform.OS === 'web') {
+                window.alert("Petugas berhasil dihapus!");
+            } else {
+                Alert.alert("Sukses", "Petugas berhasil dihapus");
             }
-          }
+            loadUsers();
+        } catch (e) {
+            console.error('Gagal menghapus user:', e);
+            if (Platform.OS === 'web') {
+                window.alert("Gagal menghapus petugas. Cek koneksi.");
+            } else {
+                Alert.alert('Error', 'Gagal menghapus petugas.');
+            }
         }
-      ]
-    );
+    };
+
+    // LOGIKA PEMISAH (WEB vs HP)
+    if (Platform.OS === 'web') {
+        // Jika di Browser, pakai window.confirm bawaan browser
+        const yakin = window.confirm(`Yakin ingin menghapus petugas ${username}?`);
+        if (yakin) {
+            executeDelete();
+        }
+    } else {
+        // Jika di HP, pakai Alert bawaan React Native
+        Alert.alert(
+            "Konfirmasi Hapus",
+            `Yakin ingin menghapus petugas ${username}?`,
+            [
+                { text: "Batal", style: "cancel" },
+                { text: "Hapus", style: "destructive", onPress: executeDelete }
+            ]
+        );
+    }
   };
 
   // --- 4. PERSIAPAN UPDATE (BUKA MODAL) ---
