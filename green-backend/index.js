@@ -362,6 +362,7 @@ app.delete('/api/records/:id', async (req, res) => {
 // ==========================================
 // 1. EKSPOR EXCEL BULANAN (REVISI WARNA)
 // ==========================================
+// --- ENDPOINT EXPORT EXCEL BULANAN (FIXED) ---
 app.get('/api/export/monthly', async (req, res) => {
     const targetMonth = req.query.month ? parseInt(req.query.month) : new Date().getMonth() + 1;
     const targetYear = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
@@ -391,27 +392,24 @@ app.get('/api/export/monthly', async (req, res) => {
             { name: 'Area Ruang Tunggu', color: colors.tunggu }
         ];
 
-        // Struktur Kolom
-        // Ganti blok 'const structure' di index.js dengan ini:
-
-const structure = {
-    organik: [
-        { header: 'Daun Kering', keywords: ['daun', 'kering'] },
-        { header: 'Sisa Makanan', keywords: ['makan', 'sisa'] }
-    ],
-    anorganik: [
-        { header: 'Kertas', keywords: ['kertas'] },
-        { header: 'Kardus', keywords: ['kardus'] },
-        { header: 'Plastik', keywords: ['plastik'] },
-        { header: 'Duplex', keywords: ['duplex'] },
-        { header: 'Kantong', keywords: ['kantong', 'kresek', 'semen'] } 
-    ],
-    residu: [
-        // Header Vial & Botol SUDAH DIHAPUS dari sini
-        { header: 'Drum Vat', keywords: ['drum', 'vat'] },
-        { header: 'Residu', keywords: ['residu', 'lain'] }
-    ]
-};
+        // Struktur Item
+        const structure = {
+            organik: [
+                { header: 'Daun Kering', keywords: ['daun', 'kering'] },
+                { header: 'Sisa Makanan', keywords: ['makan', 'sisa'] }
+            ],
+            anorganik: [
+                { header: 'Kertas', keywords: ['kertas'] },
+                { header: 'Kardus', keywords: ['kardus'] },
+                { header: 'Plastik', keywords: ['plastik'] },
+                { header: 'Duplex', keywords: ['duplex'] },
+                { header: 'Kantong', keywords: ['kantong', 'kresek', 'semen'] } 
+            ],
+            residu: [
+                { header: 'Drum Vat', keywords: ['drum', 'vat'] },
+                { header: 'Residu', keywords: ['residu', 'lain'] }
+            ]
+        };
 
         const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
         const reportData = {};
@@ -427,7 +425,7 @@ const structure = {
             });
         }
 
-        // Isi Data
+        // Mapping Data dari Database
         rows.forEach(row => {
             const day = new Date(row.recorded_at).getDate();
             const dbArea = row.area_label ? row.area_label.toLowerCase() : '';
@@ -454,15 +452,16 @@ const structure = {
             }
         });
 
-        const workbook = new excel.Workbook();
+        const workbook = new ExcelJS.Workbook(); // Pastikan Import ExcelJS benar
         const worksheet = workbook.addWorksheet(`Laporan ${targetMonth}-${targetYear}`);
 
-        // --- KONFIGURASI KOLOM ---
-        const colsPerArea = 15;
+        // --- PERBAIKAN: HITUNG LEBAR KOLOM YANG BENAR ---
+        // Organik(2) + Sub(1) + Anorg(5) + Sub(1) + Terkelola(1) + Residu(2) + TakTerkelola(1) = 13
+        const colsPerArea = 13; 
         const totalAreaCols = 2 + (colsPerArea * areaList.length);
         const finalTotalCols = totalAreaCols + 2; 
 
-        // Fungsi Helper Huruf Excel
+        // Helper Huruf Excel
         const getColLetter = (n) => {
             let s = "";
             while(n >= 0) {
@@ -473,7 +472,7 @@ const structure = {
         };
         const lastColLetter = getColLetter(finalTotalCols - 1);
 
-        // --- HEADER JUDUL ---
+        // Header Judul
         worksheet.mergeCells(`A1:${lastColLetter}1`);
         worksheet.getCell('A1').value = `REKAMAN TIMBULAN SAMPAH - BULAN ${targetMonth}/${targetYear}`;
         worksheet.getCell('A1').font = { bold: true, size: 14 };
@@ -485,52 +484,51 @@ const structure = {
         worksheet.getCell('A3').value = 'No'; worksheet.mergeCells('A3:A5');
         worksheet.getCell('B3').value = 'Tanggal'; worksheet.mergeCells('B3:B5');
 
-        // --- LOOP HEADER AREA ---
-        // Kita simpan index kolom "Terkelola" dan "Tidak Terkelola" untuk diwarnai nanti
         const specialColsIndex = []; 
 
         areaList.forEach(area => {
             const startCol = currentIdx;
             const endCol = currentIdx + colsPerArea - 1;
             
-            // 1. Header Nama Area (TETAP BERWARNA)
+            // 1. Header Nama Area
             worksheet.mergeCells(3, startCol, 3, endCol);
             const cellArea = worksheet.getCell(3, startCol);
             cellArea.value = area.name.toUpperCase();
             cellArea.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: area.color } }; 
 
-            // 2. Sub Header
+            // 2. Sub Header (Kategori)
+            // Organik
             worksheet.mergeCells(4, currentIdx, 4, currentIdx + 1);
             worksheet.getCell(4, currentIdx).value = 'Organik';
             worksheet.getCell(4, currentIdx + 2).value = 'Total Organik';
 
+            // Anorganik
             const anorgStart = currentIdx + 3;
             worksheet.mergeCells(4, anorgStart, 4, anorgStart + 4);
             worksheet.getCell(4, anorgStart).value = 'Anorganik';
             worksheet.getCell(4, anorgStart + 5).value = 'Total Anorganik';
             
-            // TOTAL TERKELOLA (PER AREA) -> Warna Hijau
+            // Total Terkelola (PERBAIKAN INDEX)
             const colTerkelolaLocal = anorgStart + 6; 
             worksheet.getCell(4, colTerkelolaLocal).value = 'Total Terkelola';
-            // Simpan index ini untuk pewarnaan baris data nanti
             specialColsIndex.push({ index: colTerkelolaLocal, type: 'terkelola' });
 
-            const residuStart = anorgStart + 7;
-            worksheet.mergeCells(4, residuStart, 4, residuStart + 3);
+            // Residu
+            const residuStart = colTerkelolaLocal + 1;
+            worksheet.mergeCells(4, residuStart, 4, residuStart + 1); // Merge 2 kolom residu
             worksheet.getCell(4, residuStart).value = 'Sampah Tidak Terkelola';
             
-            // TOTAL TIDAK TERKELOLA (PER AREA) -> Warna Merah
-            const colResiduLocal = residuStart + 4;
+            // Total Tidak Terkelola (PERBAIKAN INDEX)
+            const colResiduLocal = residuStart + 2;
             worksheet.getCell(4, colResiduLocal).value = 'Total Tidak Terkelola'; 
-            // Simpan index ini
             specialColsIndex.push({ index: colResiduLocal, type: 'residu' });
 
             // 3. Item Headers (Baris 5)
             let subIdx = currentIdx;
             structure.organik.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
-            worksheet.getCell(5, subIdx++).value = '(Kg)'; 
+            worksheet.getCell(5, subIdx++).value = '(Kg)'; // Subtotal Org
             structure.anorganik.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
-            worksheet.getCell(5, subIdx++).value = '(Kg)'; 
+            worksheet.getCell(5, subIdx++).value = '(Kg)'; // Subtotal Anorg
             worksheet.getCell(5, subIdx++).value = '(Kg)'; // Unit Total Terkelola
             structure.residu.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
             worksheet.getCell(5, subIdx++).value = '(Kg)'; // Unit Total Tidak Terkelola
@@ -545,42 +543,43 @@ const structure = {
         worksheet.mergeCells(3, colGrandTerkelola, 5, colGrandTerkelola);
         const cellGT = worksheet.getCell(3, colGrandTerkelola);
         cellGT.value = "TOTAL SAMPAH TERKELOLA SETIAP AREA";
-        cellGT.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.terkelola.header } }; // Hijau
+        cellGT.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.terkelola.header } }; 
         cellGT.font = { bold: true, size: 9 };
         cellGT.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        cellGT.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
-
+        
         worksheet.mergeCells(3, colGrandTidakTerkelola, 5, colGrandTidakTerkelola);
         const cellGTT = worksheet.getCell(3, colGrandTidakTerkelola);
         cellGTT.value = "TOTAL SAMPAH TIDAK TERKELOLA SETIAP AREA";
-        cellGTT.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.residu.header } }; // Merah
+        cellGTT.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.residu.header } }; 
         cellGTT.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
         cellGTT.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        cellGTT.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
 
-        // --- STYLE HEADER GLOBAL ---
+        // Style Header Global
         for (let r = 3; r <= 5; r++) {
             const row = worksheet.getRow(r);
             row.height = 30; 
             row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-                cell.font = Object.assign({}, cell.font || {}, { bold: true, size: 9 });
-                cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
                 cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+                // Pastikan border grand total tergambar
+                if (colNumber > totalAreaCols && colNumber <= finalTotalCols) {
+                     cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+                }
                 
+                // Style Font umum
+                if (!cell.font) cell.font = { bold: true, size: 9 };
+                cell.alignment = Object.assign({}, cell.alignment || {}, { horizontal: 'center', vertical: 'middle', wrapText: true });
+
                 // No & Tanggal -> Abu abu
-                if (colNumber <= 2) {
-                     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEEEEE' } }; 
-                } 
+                if (colNumber <= 2) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEEEEE' } }; 
                 
-                // Cek apakah kolom ini termasuk kolom spesial (Terkelola/Residu per Area)
-                // Jika ya, warnai header-nya (Baris 4 dan 5)
+                // Warnai Sub-Header Spesial (Terkelola/Residu)
                 const specialCol = specialColsIndex.find(s => s.index === colNumber);
-                if (specialCol && r > 3) { // Hanya baris 4 dan 5 (Sub header)
+                if (specialCol && r > 3) { 
                     if (specialCol.type === 'terkelola') {
                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.terkelola.header } };
                     } else if (specialCol.type === 'residu') {
                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.residu.header } };
-                        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; // Putih
+                        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
                     }
                 }
             });
@@ -610,12 +609,12 @@ const structure = {
                 rowValues.push(sumOrganik || '-');
                 structure.anorganik.forEach(i => rowValues.push(r[i.header] || '-'));
                 rowValues.push(sumAnorganik || '-');
-                rowValues.push(totalTerkelolaArea || '-'); // Ini kolom Terkelola Local
+                rowValues.push(totalTerkelolaArea || '-'); // Kolom Terkelola Local
                 structure.residu.forEach(i => rowValues.push(r[i.header] || '-'));
-                rowValues.push(sumResidu || '-'); // Ini kolom Residu Local
+                rowValues.push(sumResidu || '-'); // Kolom Residu Local
             });
 
-            // Grand Total (Ujung Kanan)
+            // Push Grand Total ke Array Data
             rowValues.push(dailyGrandTerkelola || '-');
             rowValues.push(dailyGrandTidakTerkelola || '-');
 
@@ -630,22 +629,20 @@ const structure = {
                 const val = cell.value;
                 if (typeof val === 'number') grandTotals[colNumber] = (grandTotals[colNumber] || 0) + val;
 
-                // 1. Cek apakah ini kolom spesial per area (Merah/Hijau per Area)
+                // Warnai Kolom Spesial
                 const specialCol = specialColsIndex.find(s => s.index === colNumber);
                 if (specialCol) {
                     if (specialCol.type === 'terkelola') {
-                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.terkelola.cell } }; // Hijau Pucat
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.terkelola.cell } }; 
                     } else if (specialCol.type === 'residu') {
-                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.residu.cell } }; // Merah Pucat
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.residu.cell } }; 
                     }
                 } 
-                // 2. Cek Grand Total Ujung Kanan
                 else if (colNumber === colGrandTerkelola) {
                     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.terkelola.cell } };
                 } else if (colNumber === colGrandTidakTerkelola) {
                     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.residu.cell } };
                 }
-                // SELAIN ITU PUTIH (DEFAULT)
             });
         }
 
@@ -663,27 +660,28 @@ const structure = {
             
             const cellKg = worksheet.getCell(rowTotalKg, c);
             cellKg.value = totalVal;
+            
             const cellTon = worksheet.getCell(rowTotalTon, c);
             cellTon.value = (totalVal / 1000);
             cellTon.numFmt = '0.000';
+            
             const cellAvg = worksheet.getCell(rowAvg, c);
             cellAvg.value = (totalVal / daysInMonth);
             cellAvg.numFmt = '0.00';
         }
 
-        // Style Footer (Ikuti Logika Warna Kolom)
+        // Style Footer
         [rowTotalKg, rowTotalTon, rowAvg].forEach(r => {
             const row = worksheet.getRow(r);
             row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
                 cell.font = { bold: true };
                 cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
                 
-                // Warnai Footer jika kolomnya spesial
+                // Warnai Footer
                 const specialCol = specialColsIndex.find(s => s.index === colNumber);
                 if (specialCol) {
-                    if (specialCol.type === 'terkelola') {
-                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.terkelola.header } };
-                    } else if (specialCol.type === 'residu') {
+                    if (specialCol.type === 'terkelola') cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.terkelola.header } };
+                    else if (specialCol.type === 'residu') {
                          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.residu.header } };
                          cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
                     }
@@ -693,7 +691,6 @@ const structure = {
                      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.residu.header } };
                      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
                 } else {
-                    // Footer default (bisa orange muda atau putih, kita buat putih/abu muda saja biar bersih)
                     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEEEEE' } };
                 }
             });
@@ -925,6 +922,7 @@ app.get('/api/export/pdf-monthly', async (req, res) => {
 // ==========================================
 // 2. EKSPOR EXCEL TAHUNAN (REVISI WARNA)
 // ==========================================
+// --- ENDPOINT EXPORT EXCEL TAHUNAN (FIXED) ---
 app.get('/api/export/yearly', async (req, res) => {
     const targetYear = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
 
@@ -936,14 +934,14 @@ app.get('/api/export/yearly', async (req, res) => {
             [targetYear]
         );
 
-        // Definisi Warna (Sama)
+        // --- DEFINISI WARNA (Sama dengan Bulanan) ---
         const colors = {
-            kantor:     'FFADD8E6', 
-            parkir:     'FF90EE90', 
-            makan:      'FFFFA500', 
-            tunggu:     'FFFFFF00', 
-            terkelola:  { header: 'FF32CD32', cell: 'FFE8F5E9' }, 
-            residu:     { header: 'FFFF0000', cell: 'FFFFEBEE' }  
+            kantor:     'FFADD8E6', // Biru
+            parkir:     'FF90EE90', // Hijau Muda
+            makan:      'FFFFA500', // Orange
+            tunggu:     'FFFFFF00', // Kuning
+            terkelola:  { header: 'FF32CD32', cell: 'FFE8F5E9' }, // Hijau Tua & Hijau Pucat
+            residu:     { header: 'FFFF0000', cell: 'FFFFEBEE' }  // Merah & Merah Pucat
         };
 
         const areaList = [
@@ -953,26 +951,24 @@ app.get('/api/export/yearly', async (req, res) => {
             { name: 'Area Ruang Tunggu', color: colors.tunggu }
         ];
 
-        // Ganti blok 'const structure' di index.js dengan ini:
-
-const structure = {
-    organik: [
-        { header: 'Daun Kering', keywords: ['daun', 'kering'] },
-        { header: 'Sisa Makanan', keywords: ['makan', 'sisa'] }
-    ],
-    anorganik: [
-        { header: 'Kertas', keywords: ['kertas'] },
-        { header: 'Kardus', keywords: ['kardus'] },
-        { header: 'Plastik', keywords: ['plastik'] },
-        { header: 'Duplex', keywords: ['duplex'] },
-        { header: 'Kantong', keywords: ['kantong', 'kresek', 'semen'] } 
-    ],
-    residu: [
-        // Header Vial & Botol SUDAH DIHAPUS dari sini
-        { header: 'Drum Vat', keywords: ['drum', 'vat'] },
-        { header: 'Residu', keywords: ['residu', 'lain'] }
-    ]
-};
+        // Struktur Item (Sama dengan Bulanan)
+        const structure = {
+            organik: [
+                { header: 'Daun Kering', keywords: ['daun', 'kering'] },
+                { header: 'Sisa Makanan', keywords: ['makan', 'sisa'] }
+            ],
+            anorganik: [
+                { header: 'Kertas', keywords: ['kertas'] },
+                { header: 'Kardus', keywords: ['kardus'] },
+                { header: 'Plastik', keywords: ['plastik'] },
+                { header: 'Duplex', keywords: ['duplex'] },
+                { header: 'Kantong', keywords: ['kantong', 'kresek', 'semen'] } 
+            ],
+            residu: [
+                { header: 'Drum Vat', keywords: ['drum', 'vat'] },
+                { header: 'Residu', keywords: ['residu', 'lain'] }
+            ]
+        };
 
         const monthNames = [
             'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -991,7 +987,7 @@ const structure = {
             });
         }
 
-        // Isi Data
+        // Mapping Data dari Database
         rows.forEach(row => {
             const dateObj = new Date(row.recorded_at);
             const monthIndex = dateObj.getMonth();
@@ -1019,13 +1015,15 @@ const structure = {
             }
         });
 
-        const workbook = new excel.Workbook();
+        const workbook = new ExcelJS.Workbook();
         const worksheet = workbook.addWorksheet(`Laporan Tahun ${targetYear}`);
 
-        // Konfigurasi Kolom
-        const colsPerArea = 15;
+        // --- KONFIGURASI KOLOM (FIXED: 13 Kolom per Area) ---
+        const colsPerArea = 13;
         const totalAreaCols = 2 + (colsPerArea * areaList.length);
         const finalTotalCols = totalAreaCols + 2;
+        
+        // Helper Huruf Excel
         const getColLetter = (n) => {
             let s = "";
             while (n >= 0) {
@@ -1053,15 +1051,19 @@ const structure = {
             const startCol = currentIdx;
             const endCol = currentIdx + colsPerArea - 1;
 
+            // 1. Header Nama Area
             worksheet.mergeCells(3, startCol, 3, endCol);
             const cellArea = worksheet.getCell(3, startCol);
             cellArea.value = area.name.toUpperCase();
             cellArea.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: area.color } };
 
+            // 2. Sub Header (Kategori)
+            // Organik
             worksheet.mergeCells(4, currentIdx, 4, currentIdx + 1);
             worksheet.getCell(4, currentIdx).value = 'Organik';
             worksheet.getCell(4, currentIdx + 2).value = 'Total Organik';
 
+            // Anorganik
             const anorgStart = currentIdx + 3;
             worksheet.mergeCells(4, anorgStart, 4, anorgStart + 4);
             worksheet.getCell(4, anorgStart).value = 'Anorganik';
@@ -1072,28 +1074,29 @@ const structure = {
             worksheet.getCell(4, colTerkelolaLocal).value = 'Total Terkelola';
             specialColsIndex.push({ index: colTerkelolaLocal, type: 'terkelola' });
 
+            // Residu & Tidak Terkelola
             const residuStart = anorgStart + 7;
-            worksheet.mergeCells(4, residuStart, 4, residuStart + 3);
+            worksheet.mergeCells(4, residuStart, 4, residuStart + 1);
             worksheet.getCell(4, residuStart).value = 'Sampah Tidak Terkelola';
             
-            // Total Residu Lokal
-            const colResiduLocal = residuStart + 4;
+            const colResiduLocal = residuStart + 2;
             worksheet.getCell(4, colResiduLocal).value = 'Total Tidak Terkelola';
             specialColsIndex.push({ index: colResiduLocal, type: 'residu' });
 
+            // 3. Item Headers (Baris 5)
             let subIdx = currentIdx;
             structure.organik.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
-            worksheet.getCell(5, subIdx++).value = '(Kg)';
+            worksheet.getCell(5, subIdx++).value = '(Kg)'; // Sub Org
             structure.anorganik.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
-            worksheet.getCell(5, subIdx++).value = '(Kg)';
-            worksheet.getCell(5, subIdx++).value = '(Kg)';
+            worksheet.getCell(5, subIdx++).value = '(Kg)'; // Sub Anorg
+            worksheet.getCell(5, subIdx++).value = '(Kg)'; // Unit Total Terkelola
             structure.residu.forEach(i => { worksheet.getCell(5, subIdx++).value = i.header; });
-            worksheet.getCell(5, subIdx++).value = '(Kg)';
+            worksheet.getCell(5, subIdx++).value = '(Kg)'; // Unit Total Residu
 
             currentIdx += colsPerArea;
         });
 
-        // Header Grand Total
+        // Header Grand Total (Ujung Kanan)
         const colGrandTerkelola = totalAreaCols + 1;
         const colGrandTidakTerkelola = totalAreaCols + 2;
 
@@ -1103,15 +1106,13 @@ const structure = {
         cellGT.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.terkelola.header } };
         cellGT.font = { bold: true, size: 9 };
         cellGT.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        cellGT.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-
+        
         worksheet.mergeCells(3, colGrandTidakTerkelola, 5, colGrandTidakTerkelola);
         const cellGTT = worksheet.getCell(3, colGrandTidakTerkelola);
         cellGTT.value = "TOTAL SAMPAH TIDAK TERKELOLA SETIAP AREA";
         cellGTT.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.residu.header } };
         cellGTT.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
         cellGTT.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        cellGTT.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
 
         // Global Style & Coloring
         for (let r = 3; r <= 5; r++) {
@@ -1121,6 +1122,12 @@ const structure = {
                 cell.font = Object.assign({}, cell.font || {}, { bold: true, size: 9 });
                 cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
                 cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+                
+                // Pastikan border grand total tergambar
+                if (colNumber > totalAreaCols && colNumber <= finalTotalCols) {
+                     cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+                }
+
                 if (colNumber <= 2) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEEEEE' } };
 
                 // Warnai Header Khusus per Area
@@ -1158,9 +1165,9 @@ const structure = {
                 rowValues.push(sumOrganik || '-');
                 structure.anorganik.forEach(i => rowValues.push(r[i.header] || '-'));
                 rowValues.push(sumAnorganik || '-');
-                rowValues.push(totalTerkelolaArea || '-');
+                rowValues.push(totalTerkelolaArea || '-'); // Kolom Terkelola Local
                 structure.residu.forEach(i => rowValues.push(r[i.header] || '-'));
-                rowValues.push(sumResidu || '-');
+                rowValues.push(sumResidu || '-'); // Kolom Residu Local
             });
 
             rowValues.push(monthlyGrandTerkelola || '-');
@@ -1177,7 +1184,7 @@ const structure = {
                 const val = cell.value;
                 if (typeof val === 'number') grandTotalsFooter[colNumber] = (grandTotalsFooter[colNumber] || 0) + val;
 
-                // Warnai kolom spesial per area
+                // Warnai kolom spesial per area & Grand Total
                 const specialCol = specialColsIndex.find(s => s.index === colNumber);
                 if (specialCol) {
                     if (specialCol.type === 'terkelola') {
@@ -1206,10 +1213,14 @@ const structure = {
 
         for (let c = 3; c <= finalTotalCols; c++) {
             const totalVal = grandTotalsFooter[c] || 0;
-            worksheet.getCell(rowTotalKg, c).value = totalVal;
+            
+            const cellKg = worksheet.getCell(rowTotalKg, c);
+            cellKg.value = totalVal;
+            
             const cellTon = worksheet.getCell(rowTotalTon, c);
             cellTon.value = (totalVal / 1000);
             cellTon.numFmt = '0.000';
+            
             const cellAvg = worksheet.getCell(rowAvg, c);
             cellAvg.value = (totalVal / daysInYear);
             cellAvg.numFmt = '0.00';
@@ -1256,7 +1267,6 @@ const structure = {
         res.status(500).json({ message: 'Gagal export tahunan' });
     }
 });
-
 if (require.main === module) {
     app.listen(PORT, () => {
         console.log(`✅ Server BERHASIL berjalan di http://localhost:${PORT}`);
