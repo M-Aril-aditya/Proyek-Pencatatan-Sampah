@@ -329,9 +329,10 @@ app.get('/api/records', async (req, res) => {
     const dateCondition = getSQLDateCondition(range, year, month, week, date);
     
     // PERUBAHAN DISINI: Tambahkan 'id' di paling depan
+    // Pastikan ada "id" di paling depan
     const query = `
-      SELECT id, area_label, item_label, status, weight_kg, petugas_name, recorded_at
-      FROM waste_records WHERE ${dateCondition} ORDER BY recorded_at DESC;
+     SELECT id, area_label, item_label, status, weight_kg, petugas_name, recorded_at
+     FROM waste_records WHERE ${dateCondition} ORDER BY recorded_at DESC;
     `;
     
     const recordsQuery = await pool.query(query);
@@ -343,17 +344,12 @@ app.get('/api/records', async (req, res) => {
 
 // --- F. HAPUS DATA ---
 // --- FITUR HAPUS SATUAN (PER ID) ---
+// Endpoint Hapus
 app.delete('/api/records/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    // Jalankan perintah hapus
     const result = await pool.query('DELETE FROM waste_records WHERE id = $1', [id]);
-    
-    // Cek apakah ada data yang terhapus
-    if (result.rowCount === 0) {
-      return res.status(404).json({ message: 'Data tidak ditemukan.' });
-    }
-
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Data tidak ditemukan.' });
     res.json({ message: 'Data berhasil dihapus.' });
   } catch (err) {
     console.error(err);

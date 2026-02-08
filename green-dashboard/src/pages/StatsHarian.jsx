@@ -63,7 +63,7 @@ function StatsHarian() {
 
     try {
       const token = localStorage.getItem('adminToken');
-      const baseURL = 'http://localhost:3000'; // Sesuaikan URL Backend
+      const baseURL = 'https://proyek-pencatatan-sampah.vercel.app'; // Sesuaikan URL Backend
 
       await axios.delete(`${baseURL}/api/records/${id}`, {
         headers: { 'Authorization': `Bearer ${token}` }

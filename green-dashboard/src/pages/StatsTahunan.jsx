@@ -72,7 +72,7 @@ function StatsTahunan() {
 
     try {
       const token = localStorage.getItem('adminToken');
-      const baseURL = 'http://localhost:3000'; // Sesuaikan URL Backend
+      const baseURL = 'https://proyek-pencatatan-sampah.vercel.app'; // Sesuaikan URL Backend
 
       await axios.delete(`${baseURL}/api/records/${id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -320,7 +320,7 @@ function StatsTahunan() {
     setErrorMessage('');
     const token = localStorage.getItem('adminToken');
     try {
-      const baseURL = 'http://localhost:3000'; // Pastikan URL ini benar
+      const baseURL = 'https://proyek-pencatatan-sampah.vercel.app'; // Pastikan URL ini benar
       const response = await axios.get(`${baseURL}/api/export/yearly`, {
         headers: { 'Authorization': `Bearer ${token}` },
         params: { year: selectedYear },
