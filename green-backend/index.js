@@ -6,7 +6,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const csv = require('csv-parser');
-const excel = require('exceljs');
+const ExcelJS = require('exceljs');
 const { Readable } = require('stream');
 const PDFDocument = require('pdfkit-table');
 
