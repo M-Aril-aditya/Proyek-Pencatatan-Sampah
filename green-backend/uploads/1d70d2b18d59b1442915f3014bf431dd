@@ -1,0 +1,12 @@
+﻿Area,Nama Item,Pengelola,Status,Bobot (Kg),Petugas,Waktu Catat
+"Area Parkir","Daun Kering","-","Organik Terpilah",2,"Wati","28/11/2025 04.46"
+"Area Parkir","Sampah Makanan","-","Organik Terpilah",2,"Wati","28/11/2025 04.46"
+"Area Parkir","Kertas","-","Anorganik Terpilah",4,"Wati","28/11/2025 04.46"
+"Area Parkir","Kardus","-","Anorganik Terpilah",4,"Wati","28/11/2025 04.46"
+"Area Parkir","Plastik","-","Anorganik Terpilah",4,"Wati","28/11/2025 04.46"
+"Area Parkir","Duplex","-","Anorganik Terpilah",4,"Wati","28/11/2025 04.46"
+"Area Parkir","Kantong Semen","-","Anorganik Terpilah",4,"Wati","28/11/2025 04.46"
+"Area Parkir","Vial","-","Tidak Terkelola",6,"Wati","28/11/2025 04.46"
+"Area Parkir","Drum Vat","-","Tidak Terkelola",6,"Wati","28/11/2025 04.46"
+"Area Parkir","Botol","-","Tidak Terkelola",6,"Wati","28/11/2025 04.46"
+"Area Parkir","Residu Lainnya","-","Tidak Terkelola",6,"Wati","28/11/2025 04.46"
