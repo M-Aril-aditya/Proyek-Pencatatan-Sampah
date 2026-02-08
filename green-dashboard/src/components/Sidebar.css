@@ -1,0 +1,106 @@
+.sidebar {
+  width: 250px;
+  background-color: #1D5D50;
+  color: #ffffff;
+  padding-top: 1.5rem;
+  height: 100vh;
+  position: fixed;
+  top: 0;
+  left: 0;
+  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 1rem 1.5rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  margin-bottom: 1rem;
+}
+
+.sidebar-title {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 600;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 0 1rem;
+  gap: 0.5rem;
+}
+
+/* Tombol Menu Utama (Parent) */
+.sidebar-button-parent {
+  background-color: transparent;
+  border: none;
+  color: #e0e0e0;
+  padding: 0.9rem 1rem;
+  text-align: left;
+  font-size: 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%; /* Pastikan tombol mengisi ruang */
+  text-decoration: none; /* Hapus underline dari NavLink */
+}
+
+.sidebar-button-parent:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+/* Tombol Sub-menu (Anak) */
+.sidebar-button {
+  background-color: transparent;
+  border: none;
+  color: #d0d0d0; /* Sedikit lebih redup */
+  padding: 0.7rem 1rem 0.7rem 3.2rem; /* Beri indentasi */
+  text-align: left;
+  font-size: 0.95rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-decoration: none;
+}
+
+.sidebar-button:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+/* Style untuk NavLink yang Aktif (sub-menu) */
+.sidebar-button.active {
+  background-color: #ffffff;
+  color: #1D5D50;
+  font-weight: 600;
+}
+
+/* Style untuk NavLink yang Aktif (menu utama) */
+.sidebar-button-parent.active {
+  background-color: #ffffff;
+  color: #1D5D50;
+  font-weight: 600;
+}
+
+.sidebar-icon {
+  /* Ikon di tombol parent */
+}
+
+.sidebar-submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.25rem;
+}

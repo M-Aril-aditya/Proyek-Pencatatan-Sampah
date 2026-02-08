@@ -1,0 +1,62 @@
+{
+  "expo": {
+    "name": "Green Dexa",
+    "slug": "green-dexa-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "greendexa",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": "*/*",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#1D5D50",
+        "foregroundImage": "./assets/images/adaptive-icon.png"
+      },
+      "package": "com.dexamedica.greenapp",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/leaf.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff",
+          "dark": {
+            "backgroundColor": "#000000"
+          }
+        }
+      ],
+      "expo-font",
+      "expo-web-browser"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "extra": {
+        "eas": {
+          "projectId": "57533e54-2ef8-4f69-85b4-3fbfbba12d03"
+        }
+      },
+      "eas": {
+        "projectId": "57533e54-2ef8-4f69-85b4-3fbfbba12d03"
+      }
+    },
+    "owner": "aril26"
+  }
+}
