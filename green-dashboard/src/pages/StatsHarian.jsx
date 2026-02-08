@@ -28,7 +28,7 @@ function StatsHarian() {
     const headers = { 'Authorization': `Bearer ${token}` };
     
     try {
-      const baseURL = 'proyek-pencatatan-sampah.vercel.app'; // Pastikan URL Backend benar (Localhost/Vercel)
+      const baseURL = 'https://proyek-pencatatan-sampah.vercel.app'; // Pastikan URL Backend benar (Localhost/Vercel)
       
       const statsRequest = axios.get(`${baseURL}/api/stats`, { params, headers });
       const recordsRequest = axios.get(`${baseURL}/api/records`, { params, headers });
