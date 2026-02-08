@@ -43,7 +43,7 @@ function StatsTahunan() {
     const headers = { 'Authorization': `Bearer ${token}` };
     
     try {
-      const baseURL = 'http://localhost:3000'; // Sesuaikan URL Backend
+      const baseURL = 'proyek-pencatatan-sampah.vercel.app'; // Sesuaikan URL Backend
       const statsRequest = axios.get(`${baseURL}/api/stats`, { params, headers });
       const recordsRequest = axios.get(`${baseURL}/api/records`, { params, headers });
 
